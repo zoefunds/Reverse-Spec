@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
-from app.api import auth, bounties, health, rewards, submissions, users
+from app.api import auth, bounties, health, rewards, stats, submissions, users
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
 from app.core.ratelimit import limiter
@@ -75,6 +75,7 @@ def create_app() -> FastAPI:
     app.include_router(submissions.router, prefix=prefix)
     app.include_router(users.router, prefix=prefix)
     app.include_router(rewards.router, prefix=prefix)
+    app.include_router(stats.router, prefix=prefix)
     app.include_router(health.router)  # unprefixed for Fly checks
     return app
 

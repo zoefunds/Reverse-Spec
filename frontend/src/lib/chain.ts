@@ -7,7 +7,7 @@
  * never touches keys.
  */
 
-import { createClient } from "genlayer-js";
+import { createAccount, createClient } from "genlayer-js";
 import { localnet, studionet } from "genlayer-js/chains";
 import { TransactionStatus } from "genlayer-js/types";
 
@@ -20,7 +20,11 @@ type GLClient = ReturnType<typeof createClient>;
 let readClient: GLClient | null = null;
 
 export function getReadClient(): GLClient {
-  if (!readClient) readClient = createClient({ chain });
+  // The RPC requires an attached account even for view calls; an
+  // ephemeral unfunded account satisfies it and never signs anything.
+  if (!readClient) {
+    readClient = createClient({ chain, account: createAccount() });
+  }
   return readClient;
 }
 

@@ -412,3 +412,32 @@ class TestViews:
         actions = [e["action"] for e in entries]
         assert actions[0] == "SUBMIT_SOLUTION"
         assert actions[1] == "CREATE_BOUNTY"
+
+
+# ---------------------------------------------------------------------------
+# Claiming (native transfer out of the contract)
+# ---------------------------------------------------------------------------
+
+class TestClaim:
+    def test_claim_zeroes_balance_and_records_settlement(self, vm, contract):
+        bounty_id = _fund_bounty(vm, contract)
+        _submit(vm, contract, bounty_id)
+        vm.sender = CREATOR
+        contract.close_submissions(bounty_id)
+        _mock_evaluation(vm)
+        contract.evaluate_submission(1)
+        contract.finalize_bounty(bounty_id)
+        expected = ESCROW * 9500 // 10000
+        assert contract.get_claimable(SOLVER_A) == str(expected)
+        vm.sender = SOLVER_A
+        claimed = contract.claim_rewards()
+        assert int(claimed) == expected
+        assert contract.get_claimable(SOLVER_A) == "0"
+        history = contract.get_reward_history(SOLVER_A, 10)
+        assert history[0]["kind"] == "CLAIM"
+        assert all(h["settled"] for h in history if h["kind"] != "CLAIM")
+
+    def test_claim_with_nothing_reverts(self, vm, contract):
+        vm.sender = SOLVER_B
+        with pytest.raises(Exception, match="EXPECTED.*nothing claimable"):
+            contract.claim_rewards()

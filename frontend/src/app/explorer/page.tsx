@@ -45,8 +45,14 @@ export default function ExplorerPage() {
 
   useEffect(() => { void load(0); }, [load]);
   useEffect(() => {
-    readContract<typeof chainStats>("get_platform_stats")
-      .then(setChainStats).catch(() => null);
+    api.stats()
+      .then((s) => {
+        if (s.platform) setChainStats(s.platform as never);
+        else throw new Error("no snapshot yet");
+      })
+      .catch(() =>
+        readContract<typeof chainStats>("get_platform_stats")
+          .then(setChainStats).catch(() => null));
   }, []);
 
   return (

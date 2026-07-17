@@ -1147,9 +1147,11 @@ Respond with ONLY a JSON object, no markdown, in exactly this shape:
         for record in self.reward_history:
             if record.recipient == recipient and not record.settled:
                 record.settled = True
-        # Native transfer out of contract balance.
-        gl.chain.Account(recipient).emit_transfer(value=amount,
-                                                  on="finalized")
+        # Native transfer out of contract balance. `get_contract_at` returns
+        # a proxy for ANY address (EOA or contract); emit_transfer sends
+        # value without calling a method.
+        gl.get_contract_at(recipient).emit_transfer(value=u256(amount),
+                                                    on="finalized")
         self.reward_history.append(RewardRecord(
             bounty_id=u32(0),
             submission_id=u32(0),

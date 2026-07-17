@@ -137,6 +137,8 @@ export const api = {
       body: JSON.stringify(body),
     }, token),
   leaderboard: () => request<LeaderboardRow[]>("/leaderboard"),
+  stats: () =>
+    request<{ platform: Record<string, unknown> | null }>("/stats"),
   rewards: (address: string) => request<RewardEvent[]>(`/rewards/${address}`),
   profile: (address: string) => request<Profile>(`/users/${address}`),
   updateMe: (body: unknown, token: string) =>

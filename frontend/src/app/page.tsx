@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 
 import { DiffPane, StatCard } from "@/components/ui";
 import { Button } from "@/components/ui";
+import { api } from "@/lib/api";
 import { readContract } from "@/lib/chain";
 import { formatGen } from "@/lib/format";
 
@@ -45,9 +46,16 @@ const STEPS = [
 export default function LandingPage() {
   const [stats, setStats] = useState<PlatformStats | null>(null);
   useEffect(() => {
-    readContract<PlatformStats>("get_platform_stats")
-      .then(setStats)
-      .catch(() => setStats(null)); // stats strip degrades silently
+    // Indexer snapshot first (fast, reliable); direct chain read as fallback.
+    api.stats()
+      .then((s) => {
+        if (s.platform) setStats(s.platform as unknown as PlatformStats);
+        else throw new Error("no snapshot yet");
+      })
+      .catch(() =>
+        readContract<PlatformStats>("get_platform_stats")
+          .then(setStats)
+          .catch(() => setStats(null)));
   }, []);
 
   return (
