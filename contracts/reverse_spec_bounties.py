@@ -1,48 +1,5 @@
+# v0.2.17
 # { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
-"""
-ReverseSpecBounties — a GenLayer Intelligent Contract.
-
-Reverse Spec Bounties inverts the traditional bounty model. Instead of paying
-for compliance with a written specification, the protocol pays the solver who
-demonstrably solved the DEEPER problem behind the specification — even when
-the delivered work departs from the original spec.
-
-Why this needs GenLayer validator consensus (and cannot be an off-chain app):
-  * The verdict "submission B solved a better problem than the spec asked for"
-    is a subjective, high-stakes judgment that directly moves escrowed funds.
-    No single server can be trusted to make it; GenLayer's Optimistic
-    Democracy makes a committee of independent AI validators agree on it.
-  * The escrow itself is native value held BY this contract. Funding,
-    payout, and refund are on-chain state transitions — a real value-transfer
-    path, not bookkeeping.
-  * Evidence is verified contract-side: validators fetch the submission's
-    public artifact (repository / gist / published document) with GenVM web
-    access and judge the FETCHED content. A submission can never win on
-    self-reported prose alone.
-
-Consensus-safety design (avoiding leader rotation / UNDETERMINED results):
-  * Every non-deterministic block runs through a custom leader/validator pair
-    with TOLERANT acceptance rules: validators re-derive their own evaluation
-    and accept the leader when the verdict tier matches within one band and
-    numeric scores agree within a fixed tolerance. Byte-equality is never
-    required for LLM output.
-  * All scores are clamped and BANDED before comparison, so small model
-    variance cannot flip acceptance.
-  * If a validator's own non-deterministic run fails for an infrastructural
-    reason (web timeout, LLM hiccup), it votes to ACCEPT a structurally valid
-    leader result rather than forcing rotation. Structural validity (shape,
-    ranges, required keys) is always enforced deterministically.
-
-Money handling:
-  * All amounts are native GEN in wei-style base units, stored as u256.
-  * Escrow accounting follows a strict conservation invariant:
-        contract balance >= open escrow + unclaimed rewards
-  * Payouts use the pull pattern: finalization credits `claimable`,
-    `claim_rewards` transfers to the caller.
-
-Deployment target: GenLayer StudioNet (deployed by the project owner via
-GenLayer Studio; this repository never deploys autonomously).
-"""
 
 from genlayer import *
 
