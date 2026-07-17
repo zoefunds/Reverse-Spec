@@ -69,7 +69,7 @@ npm run dev   # http://localhost:3000
 # contract lint + schema validation
 .venv/bin/genvm-lint check contracts/reverse_spec_bounties.py --json
 
-# contract direct tests (27)
+# contract direct tests (29)
 .venv/bin/pytest contracts-tests/direct/ -v
 
 # backend API tests (12)
@@ -81,6 +81,8 @@ cd frontend && npm run build
 
 ## Documentation
 
+- [SUBMISSION.md](SUBMISSION.md) — what this is, what problem it solves, how to use it (plain language)
+- [ROADMAP.md](ROADMAP.md) — what's next and why this is worth continuing
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — system design & decisions
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — Fly.io (24/7) + Vercel + contract
 - [docs/API.md](docs/API.md) — REST endpoints
