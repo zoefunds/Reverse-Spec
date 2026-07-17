@@ -35,9 +35,15 @@ Living record of decisions, progress, and state. Updated at the end of every sta
 - [x] Stage 6: Deployed 2026-07-17 — backend live on Fly (2 machines, indexer healthy against StudioNet contract), frontend live on Vercel, CORS locked
 
 ## Deployed addresses / endpoints
-- Contract (StudioNet): `0xbe5E27fF832B229EE584D02b82B4606030d34F40` (deployed by user, 2026-07-17)
+- Contract (StudioNet): `0x79F636e231D22ffFAE68c4FB9e69223287a5D2C4` (v2, deployed by user 2026-07-17 — includes the claim_rewards emit_transfer fix; old address 0xbe5E...F40 retired, DB mirrors wiped)
 - Backend (Fly.io): https://reverse-spec-api.fly.dev (app reverse-spec-api, DB reverse-spec-db, region iad)
 - Frontend (Vercel): https://reverse-spec.vercel.app (project reverse-spec, scope adebiyi2002gmailcoms-projects)
 
 ## Notes
 - README's "generate Python scripts for file edits" assumed a chat-only workflow; running inside Claude Code with direct file tools, so files are created directly. `scripts/` still holds deploy/seed/db scripts.
+
+## E2E verification on contract v2 (2026-07-17)
+- 4 professional bounties live: MEV/DEX 50k, GPU cold-start 35k, webhooks 18k, audit-scanner 10k GEN.
+- Full lifecycle on bounty 1: real consensus verdict DEEP_SOLUTION (composite 78, depth 91, evidence fetched), finalize paid 47,500 GEN, claim_rewards WORKS (claimable zeroed), creator reserve claimed.
+- Final chain state: 63,000 GEN open escrow, 47,500 paid out, invariant healthy.
+- E2E keys for test accounts persisted in scripts/.e2e_keys_v2.json (gitignored).
