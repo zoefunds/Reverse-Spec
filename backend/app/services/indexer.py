@@ -19,6 +19,7 @@ up regardless (the 24/7 requirement).
 
 import asyncio
 import datetime as dt
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import select
@@ -125,14 +126,16 @@ def _sync_rewards(db: Session, client) -> None:
                 RewardEvent.recipient_address == address,
                 RewardEvent.chain_bounty_id == int(e["bounty_id"]),
                 RewardEvent.kind == e["kind"],
-                RewardEvent.amount == int(e["amount"]),
+                # Decimal binds as NUMERIC; a bare int this large
+                # would bind as BIGINT and overflow.
+                RewardEvent.amount == Decimal(e["amount"]),
             )).scalars().first()
             if exists is None:
                 db.add(RewardEvent(
                     chain_bounty_id=int(e["bounty_id"]),
                     chain_submission_id=int(e["submission_id"]),
                     recipient_address=address,
-                    amount=int(e["amount"]),
+                    amount=Decimal(e["amount"]),
                     kind=e["kind"],
                     settled=bool(e["settled"]),
                 ))
