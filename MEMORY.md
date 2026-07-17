@@ -29,10 +29,10 @@ Living record of decisions, progress, and state. Updated at the end of every sta
 - [x] Planning & architecture approved by user (2026-07-17)
 - [x] Stage 1: Scaffold (2026-07-17)
 - [x] Stage 2: Contract — 1,477 lines, genvm-lint clean, schema validates (22 methods), 27 direct tests pass. Deployed by user.
-- [ ] Stage 3: Backend (FastAPI + Postgres + indexer)
-- [ ] Stage 4: Frontend (Next.js, all pages)
-- [ ] Stage 5: Testing
-- [ ] Stage 6: Deploy (Fly.io 24/7 + Vercel)
+- [x] Stage 3: Backend — FastAPI, wallet auth, indexer, Fly 24/7 config, 12 tests pass
+- [x] Stage 4: Frontend — Next.js 14, 10 routes, wallet + genlayer-js, prod build green, visually verified
+- [x] Stage 5: Testing — 27 contract direct + 12 backend + 4 StudioNet integration smoke + typed build; CI workflow added
+- [~] Stage 6: Deploy — all configs/scripts/docs ready; awaiting user go-ahead to run fly/vercel deploys (billing)
 
 ## Deployed addresses / endpoints
 - Contract (StudioNet): `0xbe5E27fF832B229EE584D02b82B4606030d34F40` (deployed by user, 2026-07-17)
