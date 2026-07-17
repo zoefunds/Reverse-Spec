@@ -3,7 +3,7 @@
 ## Contract (GenLayer StudioNet) — already deployed
 
 Deployed via GenLayer Studio by the project owner:
-`0xbe5E27fF832B229EE584D02b82B4606030d34F40`
+`0x79F636e231D22ffFAE68c4FB9e69223287a5D2C4`
 
 To redeploy (e.g. after changes): open [studio.genlayer.com](https://studio.genlayer.com),
 paste `contracts/reverse_spec_bounties.py`, deploy with no constructor args,
