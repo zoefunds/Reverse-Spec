@@ -32,12 +32,12 @@ Living record of decisions, progress, and state. Updated at the end of every sta
 - [x] Stage 3: Backend — FastAPI, wallet auth, indexer, Fly 24/7 config, 12 tests pass
 - [x] Stage 4: Frontend — Next.js 14, 10 routes, wallet + genlayer-js, prod build green, visually verified
 - [x] Stage 5: Testing — 27 contract direct + 12 backend + 4 StudioNet integration smoke + typed build; CI workflow added
-- [~] Stage 6: Deploy — all configs/scripts/docs ready; awaiting user go-ahead to run fly/vercel deploys (billing)
+- [x] Stage 6: Deployed 2026-07-17 — backend live on Fly (2 machines, indexer healthy against StudioNet contract), frontend live on Vercel, CORS locked
 
 ## Deployed addresses / endpoints
 - Contract (StudioNet): `0xbe5E27fF832B229EE584D02b82B4606030d34F40` (deployed by user, 2026-07-17)
-- Backend (Fly.io): _pending_
-- Frontend (Vercel): _pending_
+- Backend (Fly.io): https://reverse-spec-api.fly.dev (app reverse-spec-api, DB reverse-spec-db, region iad)
+- Frontend (Vercel): https://reverse-spec.vercel.app (project reverse-spec, scope adebiyi2002gmailcoms-projects)
 
 ## Notes
 - README's "generate Python scripts for file edits" assumed a chat-only workflow; running inside Claude Code with direct file tools, so files are created directly. `scripts/` still holds deploy/seed/db scripts.

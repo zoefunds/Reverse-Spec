@@ -43,13 +43,16 @@ def indexer_status() -> dict:
 
 def _make_client():
     """Create a genlayer-py read client for the configured network."""
-    from genlayer_py import create_client
+    from genlayer_py import create_account, create_client
     settings = get_settings()
     if settings.genlayer_network == "localnet":
         from genlayer_py.chains import localnet as chain
     else:
         from genlayer_py.chains import studionet as chain
-    return create_client(chain=chain)
+    # genlayer-py requires an attached account even for view calls; an
+    # ephemeral unfunded account is fine — reads are gasless and this
+    # client never signs value-bearing transactions.
+    return create_client(chain=chain, account=create_account())
 
 
 def _read(client, function_name: str, args: list) -> Any:
