@@ -230,7 +230,9 @@ class ReverseSpecBounties(gl.Contract):
     Writes (state-changing, wallet-signed):
         create_bounty        payable — fund and open a bounty
         cancel_bounty        creator, only while zero live submissions
-        close_submissions    creator — move OPEN -> EVALUATING
+        close_submissions    creator, or any solver with a live
+                             submission (abandonment recovery) —
+                             move OPEN -> EVALUATING
         submit_solution      solver — register rationale + evidence URL
         withdraw_submission  solver — before evaluation
         evaluate_submission  anyone — runs the consensus LLM evaluation
@@ -840,26 +842,43 @@ Respond with ONLY a JSON object, no markdown, in exactly this shape:
 
     @gl.public.write
     def close_submissions(self, bounty_id: u32) -> None:
-        """Creator moves a bounty from OPEN to EVALUATING.
+        """Move a bounty from OPEN to EVALUATING.
 
         After this, no new submissions are accepted and evaluations can be
         triggered. Requires at least one live submission.
+
+        Callable by the creator, OR by any solver with a live submission on
+        this bounty. This is the abandonment-recovery exit: without it, a
+        creator who stops responding after real work has been submitted
+        would permanently strand both the escrow and every solver's unpaid
+        submission, with no path forward. Since the protocol has no
+        wall-clock dependence (deliberately, for consensus determinism), a
+        stakeholder-triggered escape hatch — not a public/anyone-can-call
+        one, to avoid a stranger cutting off submissions early — is the
+        safe way to unblock this without opening a griefing vector.
         """
         bounty = self._get_bounty_or_fail(int(bounty_id))
-        self._require(bounty.creator == gl.message.sender_address,
-                      "only the creator can close submissions")
         self._require(int(bounty.status) == BOUNTY_OPEN,
                       "bounty is not OPEN")
+        caller = gl.message.sender_address
         live = 0
+        caller_has_submission = False
         for sid in bounty.submission_ids:
             sub = self.submissions.get(sid)
             if sub is not None and int(sub.status) != SUB_WITHDRAWN:
                 live += 1
+                if sub.solver == caller:
+                    caller_has_submission = True
+        self._require(
+            caller == bounty.creator or caller_has_submission,
+            "only the creator or a solver with a live submission can "
+            "close submissions")
         self._require(live > 0, "no live submissions to evaluate; "
                                 "cancel the bounty instead")
         bounty.status = u8(BOUNTY_EVALUATING)
         self._audit("CLOSE_SUBMISSIONS",
-                    f"id={int(bounty_id)} live_submissions={live}")
+                    f"id={int(bounty_id)} live_submissions={live} "
+                    f"triggered_by={'creator' if caller == bounty.creator else 'solver'}")
 
     # ========================================================================
     # SECTION 7 — Public writes: submissions

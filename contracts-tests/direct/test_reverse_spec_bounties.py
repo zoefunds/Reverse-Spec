@@ -441,3 +441,51 @@ class TestClaim:
         vm.sender = SOLVER_B
         with pytest.raises(Exception, match="EXPECTED.*nothing claimable"):
             contract.claim_rewards()
+
+
+# ---------------------------------------------------------------------------
+# Abandonment recovery: close_submissions is not creator-exclusive
+# ---------------------------------------------------------------------------
+
+class TestAbandonmentRecovery:
+    def test_solver_can_close_submissions_if_creator_vanishes(self, vm, contract):
+        bounty_id = _fund_bounty(vm, contract)
+        _submit(vm, contract, bounty_id, solver=SOLVER_A)
+        # Creator never calls close_submissions. The solver who put in real
+        # work is a stakeholder and can unstick the bounty themselves.
+        vm.sender = SOLVER_A
+        contract.close_submissions(bounty_id)
+        assert contract.get_bounty(bounty_id)["status"] == "EVALUATING"
+
+    def test_unrelated_address_cannot_close_submissions(self, vm, contract):
+        bounty_id = _fund_bounty(vm, contract)
+        _submit(vm, contract, bounty_id, solver=SOLVER_A)
+        vm.sender = SOLVER_B  # has no submission on this bounty
+        with pytest.raises(Exception, match="EXPECTED.*creator or a solver"):
+            contract.close_submissions(bounty_id)
+
+    def test_withdrawn_solver_cannot_close_submissions(self, vm, contract):
+        bounty_id = _fund_bounty(vm, contract)
+        sub_id = _submit(vm, contract, bounty_id, solver=SOLVER_A)
+        vm.sender = SOLVER_A
+        contract.withdraw_submission(sub_id)
+        with pytest.raises(Exception, match="EXPECTED.*creator or a solver"):
+            contract.close_submissions(bounty_id)
+
+    def test_abandoned_bounty_reaches_full_payout_via_solver_trigger(
+            self, vm, contract):
+        """End-to-end: creator disappears after funding + a submission
+        arrives; the solver self-serves close_submissions, evaluation and
+        finalization proceed permissionlessly, and the winner gets paid —
+        the escrow never gets permanently stuck."""
+        bounty_id = _fund_bounty(vm, contract)
+        sub_id = _submit(vm, contract, bounty_id, solver=SOLVER_A)
+        vm.sender = SOLVER_A
+        contract.close_submissions(bounty_id)
+        _mock_evaluation(vm)
+        vm.sender = SOLVER_A
+        contract.evaluate_submission(sub_id)
+        vm.sender = SOLVER_A
+        contract.finalize_bounty(bounty_id)
+        assert contract.get_bounty(bounty_id)["status"] == "RESOLVED"
+        assert contract.get_claimable(SOLVER_A) == str(ESCROW * 9500 // 10000)

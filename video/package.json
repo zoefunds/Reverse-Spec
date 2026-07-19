@@ -1,0 +1,21 @@
+{
+  "name": "reverse-spec-film",
+  "private": true,
+  "scripts": {
+    "dev": "remotion studio",
+    "render": "remotion render Master out/reverse-spec-master.mp4",
+    "render:vertical": "remotion render Vertical out/reverse-spec-vertical.mp4",
+    "render:square": "remotion render Square out/reverse-spec-square.mp4",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.410",
+    "remotion": "4.0.410",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "18.3.12",
+    "typescript": "5.6.3"
+  }
+}

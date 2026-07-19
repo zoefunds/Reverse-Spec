@@ -47,3 +47,29 @@ Living record of decisions, progress, and state. Updated at the end of every sta
 - Full lifecycle on bounty 1: real consensus verdict DEEP_SOLUTION (composite 78, depth 91, evidence fetched), finalize paid 47,500 GEN, claim_rewards WORKS (claimable zeroed), creator reserve claimed.
 - Final chain state: 63,000 GEN open escrow, 47,500 paid out, invariant healthy.
 - E2E keys for test accounts persisted in scripts/.e2e_keys_v2.json (gitignored).
+
+## Escrow audit against ShipBond reference pattern (2026-07-17)
+User supplied a battle-tested escrow brief (custody/emission separation,
+zero-then-transfer ordering, double-spend guards, enumerated exit paths)
+from an existing project (github.com/ometere123/shipbond). Audited our
+contract line-by-line against it:
+- Payable entry, gl.message.value as sole authority, terms-vs-ledger field
+  split (initial_escrow vs reward_escrow), single emission choke point
+  (claim_rewards -> gl.get_contract_at().emit_transfer), zero-before-transfer
+  ordering, explicit double-claim guard, gl.vm.UserError usage, u256 money
+  types — ALL already matched the brief's pattern (independently arrived at
+  the same design, plus already proven live with a real 47,500 GEN payout).
+- ONE real gap found: no abandonment-recovery exit. `close_submissions` was
+  creator-only, so a creator who funds a bounty, receives real submissions,
+  then goes silent, would permanently strand both the escrow and every
+  solver's unpaid work — exactly the "timeout/recovery exit people forget"
+  the brief calls out. Fixed: close_submissions is now callable by the
+  creator OR any solver with a live (non-withdrawn) submission on that
+  bounty — a stakeholder-triggered escape hatch, not open-to-anyone (avoids
+  a stranger prematurely cutting off submissions). No wall-clock dependence
+  added, preserving the deliberate no-timestamp consensus-determinism
+  design. Added 4 new tests (33 total, all passing); genvm-lint clean;
+  schema still validates (22 methods).
+- **This change is NOT yet deployed** — contract logic changed, so it
+  needs a fresh StudioNet deployment by the user and a new address before
+  going live, per the established workflow (Claude never deploys).

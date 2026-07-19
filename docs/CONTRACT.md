@@ -11,7 +11,7 @@ StudioNet address: `0x79F636e231D22ffFAE68c4FB9e69223287a5D2C4`
 |---|---|---|
 | `create_bounty(title, spec, true_problem, category, tags_csv, created_note, deadline_note)` **payable** | anyone | Escrows `msg.value` GEN, opens bounty |
 | `cancel_bounty(id)` | creator | Refund if zero live submissions |
-| `close_submissions(id)` | creator | OPEN → EVALUATING |
+| `close_submissions(id)` | creator, or any solver with a live submission | OPEN → EVALUATING (abandonment recovery) |
 | `submit_solution(bounty_id, title, rationale, evidence_url)` | solver | Registers solution (https evidence required) |
 | `withdraw_submission(id)` | solver | Before evaluation only |
 | `evaluate_submission(id)` | anyone | Consensus LLM evaluation w/ live evidence fetch |

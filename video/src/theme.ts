@@ -1,0 +1,23 @@
+// Brand tokens extracted from frontend/tailwind.config.ts ("Cognitive Engineering System")
+export const T = {
+  bg: "#0b1326",
+  bgLowest: "#060e20",
+  surfaceLow: "#131b2e",
+  surfaceMid: "#171f33",
+  surfaceHigh: "#222a3d",
+  ink: "#dae2fd",
+  inkSoft: "#c4c5d9",
+  inkFaint: "#8e90a2",
+  line: "#434656",
+  lineSoft: "rgba(255,255,255,0.08)",
+  primary: "#b8c3ff",
+  blue: "#2e5bff",
+  purple: "#571bc1",
+  purpleSoft: "#d0bcff",
+  cyan: "#4cd7f6",
+  success: "#34d399",
+  warning: "#fbbf24",
+  danger: "#ffb4ab",
+  fontHead: "'Inter', 'Helvetica Neue', system-ui, sans-serif",
+  fontMono: "'JetBrains Mono', 'SF Mono', ui-monospace, monospace",
+} as const;
