@@ -113,3 +113,51 @@ one machine, only preventing simultaneous double-polling of the rate
 limited StudioNet RPC. Verified post-fix: zero "Rate limit exceeded" or
 "indexer cycle failed" log lines, /api/v1/stats fully synced and matching
 on-chain state, escrow invariant healthy.
+
+## CRITICAL FIX: claim_rewards never actually delivered GEN to wallets (2026-07-20)
+
+**Found by direct user verification** ("the claim reward did not send the gen
+to receiver wallet — check well") after I had wrongly treated a zeroed
+`claimable` ledger + `settled: True` history record as proof of a successful
+transfer. Checked the ACTUAL wallet balance on StudioNet for solver_a (who
+"claimed" 47,500 GEN in an earlier test run): **0 GEN**. Contract balance had
+correctly dropped by the paid-out amount (113,000 -> 63,000), meaning the GEN
+left the contract but arrived nowhere — genuinely lost, not merely un-recorded.
+
+Root cause: `claim_rewards` used `gl.get_contract_at(recipient).emit_transfer(...)`.
+`get_contract_at` is GenVM's *contract-to-contract call* primitive (PostMessage) —
+it expects the target to be a deployed GenVM contract that can catch the
+message via `__receive__`. A plain wallet (EOA) has no such code, so the
+message (and its attached value) is dropped with no error surfaced back to
+the caller. Confirmed by reading a second working project on this machine
+(`~/Meme-olympics/contracts/meme_olympics.py`, same pinned Depends hash),
+whose own code comment states this exact failure mode explicitly: "fails
+with 'Contract ... not found' against any address without deployed contract
+code, which is what every user's custodial wallet is."
+
+The correct primitive is `EthSend`, reached only via `@gl.evm.contract_interface`
+(genlayer.py.evm — the actual EVM-bridge decorator), NOT the top-level
+`@gl.contract_interface`, which in this pinned SDK build is simply an alias
+for `get_contract_at` (verified by runtime introspection: `gl.contract_interface
+is get_contract_at` in the loaded module). Fixed by declaring `_PayableRecipient`
+with `@gl.evm.contract_interface` and routing all payouts through a single
+`_send_gen()` choke point.
+
+**Test suite was blind to this class of bug**: all 33 "passing" tests only
+ever asserted the contract's internal `claimable` ledger and `reward_history`
+state, never the recipient's actual balance. Added an `_eth_send_hook` to the
+gltest.direct VM fixture (the direct-test mock has no built-in EthSend
+handler) that credits/debits real mock balances on `EthSend`, and strengthened
+`TestClaim` to assert `wallet_balance(vm, SOLVER_A) == balance_before + expected`.
+Verified this test is a genuine regression guard: reverting `_send_gen` back
+to the `get_contract_at` path makes it fail with `assert 0 == 9500...` while
+`claimable` still (wrongly) shows fully settled — exactly reproducing the
+production bug. genvm-lint clean, schema still validates (22 methods), all
+33 tests pass with the fix in place.
+
+**This is NOT yet deployed.** The currently-live contract (v3,
+`0xb5f4C5C4B2162073fc1a0eA7de6EB9E0E9b8037b`) still has the broken transfer —
+any `claimable` balance already zeroed there (from prior test claims) is
+unrecoverable through the contract (StudioNet test GEN only, no real value).
+Needs a fresh redeploy + new address from the user before going live, per
+the established workflow.
