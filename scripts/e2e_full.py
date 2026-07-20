@@ -18,7 +18,7 @@ from genlayer_py import create_account, create_client
 from genlayer_py.chains import studionet
 from genlayer_py.types import TransactionStatus
 
-CONTRACT = "0x79F636e231D22ffFAE68c4FB9e69223287a5D2C4"
+CONTRACT = "0xb5f4C5C4B2162073fc1a0eA7de6EB9E0E9b8037b"
 GEN = 10**18
 KEYS = os.path.join(os.path.dirname(__file__), ".e2e_keys_v2.json")
 
@@ -221,9 +221,14 @@ def main():
               label=f"submit_solution -> bounty {bounty_ids[idx]}")
         sub_ids[idx] = int(read("get_platform_stats")["submissions_total"])
 
-    # Full lifecycle on bounty 1 (50,000 GEN, MEV).
+    # Full lifecycle on bounty 1 (50,000 GEN, MEV). Exercises the new
+    # abandonment-recovery path: the CREATOR never calls close_submissions
+    # here — the submitter (solver_a) does, proving a vanished creator
+    # can no longer permanently strand escrow + unpaid work.
     b1, s1 = bounty_ids[0], sub_ids[0]
-    write(c_creator, "close_submissions", [b1])
+    write(c_solver_a, "close_submissions", [b1],
+          label="close_submissions (solver-triggered, creator absent — "
+                "abandonment recovery)")
     write(c_solver_b, "evaluate_submission", [s1],
           label=f"evaluate_submission {s1} (real consensus)")
     ev = read("get_evaluation", [s1])

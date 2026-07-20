@@ -179,13 +179,46 @@ def run_cycle() -> None:
                    last_error=None)
 
 
+_INDEXER_LOCK_KEY = 8214_7731_0042  # arbitrary fixed advisory-lock id
+
+def _try_acquire_leader_lock():
+    """Try to become the single indexing machine via a Postgres advisory
+    lock. Fly runs 2+ machines for HA; without this, every machine polls
+    the StudioNet RPC independently and multiplies read load for no
+    benefit — the exact thing that blew through the 500 req/hour RPC
+    rate limit in production. The lock is session-scoped: if this
+    machine dies, Postgres releases it automatically and another machine
+    picks up indexing on its next attempt. Returns an open connection
+    holding the lock, or None if another machine already holds it.
+    """
+    conn = get_engine().connect()
+    got = conn.exec_driver_sql(
+        "SELECT pg_try_advisory_lock(%s)", (_INDEXER_LOCK_KEY,)
+    ).scalar()
+    if got:
+        return conn
+    conn.close()
+    return None
+
+
 async def indexer_loop() -> None:
-    """Forever loop with jittered backoff; never lets an exception escape."""
+    """Forever loop with jittered backoff; never lets an exception escape.
+
+    Only the machine holding the leader lock actually polls the chain;
+    others idle and retry acquiring the lock every cycle so a failover
+    is picked up automatically.
+    """
     settings = get_settings()
+    lock_conn = None
     while True:
+        if lock_conn is None:
+            lock_conn = await asyncio.to_thread(_try_acquire_leader_lock)
+            if lock_conn is None:
+                _status.update(state="standby", last_error=None)
+                await asyncio.sleep(settings.indexer_interval_seconds)
+                continue
         try:
             await asyncio.to_thread(run_cycle)
         except Exception as exc:  # noqa: BLE001 — indexer must never die
-            _status.update(state="degraded", last_error=str(exc)[:300])
             logger.warning("indexer cycle failed", extra={"error": str(exc)})
         await asyncio.sleep(settings.indexer_interval_seconds)

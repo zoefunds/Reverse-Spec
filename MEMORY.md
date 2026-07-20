@@ -35,7 +35,7 @@ Living record of decisions, progress, and state. Updated at the end of every sta
 - [x] Stage 6: Deployed 2026-07-17 — backend live on Fly (2 machines, indexer healthy against StudioNet contract), frontend live on Vercel, CORS locked
 
 ## Deployed addresses / endpoints
-- Contract (StudioNet): `0x79F636e231D22ffFAE68c4FB9e69223287a5D2C4` (v2, deployed by user 2026-07-17 — includes the claim_rewards emit_transfer fix; old address 0xbe5E...F40 retired, DB mirrors wiped)
+- Contract (StudioNet): `0xb5f4C5C4B2162073fc1a0eA7de6EB9E0E9b8037b` (v2, deployed by user 2026-07-17 — includes the claim_rewards emit_transfer fix; old address 0xbe5E...F40 retired, DB mirrors wiped)
 - Backend (Fly.io): https://reverse-spec-api.fly.dev (app reverse-spec-api, DB reverse-spec-db, region iad)
 - Frontend (Vercel): https://reverse-spec.vercel.app (project reverse-spec, scope adebiyi2002gmailcoms-projects)
 
