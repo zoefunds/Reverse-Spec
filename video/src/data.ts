@@ -11,7 +11,7 @@ export const DATA = {
   verdictComposite: 78,
   verdictDepth: 91,
   contractAddress: "0x79F6…D2C4",
-  contractAddressFull: "0xb5f4C5C4B2162073fc1a0eA7de6EB9E0E9b8037b",
+  contractAddressFull: "0x1DD671F0b8Be9e6fB7e7F2078261e1B840AF4439",
   url: "reverse-spec.vercel.app",
   specExcerpt:
     "Specification: implement a dynamic slippage-tolerance widget that recommends a tolerance per pair based on 24h volatility…",

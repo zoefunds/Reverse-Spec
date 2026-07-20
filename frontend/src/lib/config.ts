@@ -4,7 +4,7 @@ export const CONFIG = {
   apiBase:
     process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000/api/v1",
   contractAddress: (process.env.NEXT_PUBLIC_CONTRACT_ADDRESS ??
-    "0xb5f4C5C4B2162073fc1a0eA7de6EB9E0E9b8037b") as `0x${string}`,
+    "0x1DD671F0b8Be9e6fB7e7F2078261e1B840AF4439") as `0x${string}`,
   network: process.env.NEXT_PUBLIC_GENLAYER_NETWORK ?? "studionet",
 } as const;
 

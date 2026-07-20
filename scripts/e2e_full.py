@@ -18,7 +18,7 @@ from genlayer_py import create_account, create_client
 from genlayer_py.chains import studionet
 from genlayer_py.types import TransactionStatus
 
-CONTRACT = "0xb5f4C5C4B2162073fc1a0eA7de6EB9E0E9b8037b"
+CONTRACT = "0x1DD671F0b8Be9e6fB7e7F2078261e1B840AF4439"
 GEN = 10**18
 KEYS = os.path.join(os.path.dirname(__file__), ".e2e_keys_v2.json")
 
@@ -244,10 +244,21 @@ def main():
     claimable = int(read("get_claimable", [solver_a.address]))
     print(f"   solver_a claimable: {claimable / GEN:,.0f} GEN", flush=True)
     if claimable:
+        wallet_before = c_creator.get_balance(account=solver_a.address)
+        print(f"   solver_a REAL wallet balance before claim: "
+              f"{wallet_before / GEN:,.4f} GEN", flush=True)
         write(c_solver_a, "claim_rewards", [], label="claim_rewards")
-        after = int(read("get_claimable", [solver_a.address]))
-        print(f"   claimable after claim: {after} "
-              f"({'PASS — zeroed' if after == 0 else 'FAIL — not zeroed'})",
+        after_ledger = int(read("get_claimable", [solver_a.address]))
+        wallet_after = c_creator.get_balance(account=solver_a.address)
+        gained = wallet_after - wallet_before
+        print(f"   claimable ledger after claim: {after_ledger} "
+              f"({'zeroed' if after_ledger == 0 else 'FAIL — not zeroed'})",
+              flush=True)
+        print(f"   solver_a REAL wallet balance after claim: "
+              f"{wallet_after / GEN:,.4f} GEN (gained {gained / GEN:,.4f} GEN)",
+              flush=True)
+        print(f"   >>> WALLET-BALANCE CHECK: "
+              f"{'PASS — GEN actually arrived' if gained == claimable else 'FAIL — GEN did NOT arrive'} <<<",
               flush=True)
 
     creator_claim = int(read("get_claimable", [creator.address]))

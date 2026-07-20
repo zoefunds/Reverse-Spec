@@ -35,7 +35,7 @@ Living record of decisions, progress, and state. Updated at the end of every sta
 - [x] Stage 6: Deployed 2026-07-17 — backend live on Fly (2 machines, indexer healthy against StudioNet contract), frontend live on Vercel, CORS locked
 
 ## Deployed addresses / endpoints
-- Contract (StudioNet): `0xb5f4C5C4B2162073fc1a0eA7de6EB9E0E9b8037b` (v2, deployed by user 2026-07-17 — includes the claim_rewards emit_transfer fix; old address 0xbe5E...F40 retired, DB mirrors wiped)
+- Contract (StudioNet): `0x1DD671F0b8Be9e6fB7e7F2078261e1B840AF4439` (v2, deployed by user 2026-07-17 — includes the claim_rewards emit_transfer fix; old address 0xbe5E...F40 retired, DB mirrors wiped)
 - Backend (Fly.io): https://reverse-spec-api.fly.dev (app reverse-spec-api, DB reverse-spec-db, region iad)
 - Frontend (Vercel): https://reverse-spec.vercel.app (project reverse-spec, scope adebiyi2002gmailcoms-projects)
 
@@ -156,8 +156,27 @@ production bug. genvm-lint clean, schema still validates (22 methods), all
 33 tests pass with the fix in place.
 
 **This is NOT yet deployed.** The currently-live contract (v3,
-`0xb5f4C5C4B2162073fc1a0eA7de6EB9E0E9b8037b`) still has the broken transfer —
+`0x1DD671F0b8Be9e6fB7e7F2078261e1B840AF4439`) still has the broken transfer —
 any `claimable` balance already zeroed there (from prior test claims) is
 unrecoverable through the contract (StudioNet test GEN only, no real value).
 Needs a fresh redeploy + new address from the user before going live, per
 the established workflow.
+
+## Contract v4 rollout (0x1DD6...4439) — claim_rewards fix PROVEN live (2026-07-20)
+
+Deployed by user with the `@gl.evm.contract_interface` fix. Full rollout:
+address updated repo-wide, DB mirrors wiped, backend + frontend redeployed.
+
+**This time the verification checked REAL wallet balances, not the
+contract's internal ledger** (the exact gap that let the v3 bug through).
+Fresh e2e run: 4 bounties (10k-50k GEN), abandonment-recovery close
+(solver-triggered), real consensus (DEEP_SOLUTION, composite 84), finalize,
+claim. Then independently queried StudioNet directly for actual account
+balances:
+
+    solver_a wallet: 47,500 GEN  (expected 47,500 — winner, 95% sole submitter)
+    creator wallet:   2,500 GEN  (expected 2,500 — 5% reserve)
+    contract balance: 63,000 GEN (expected 63,000 — 3 bounties still open)
+
+All match exactly. GEN genuinely left the contract and arrived in real
+wallets this time. Bug closed.
