@@ -218,6 +218,48 @@ class AuditEntry:
 
 
 # ============================================================================
+# SECTION 2b — Native value transfer (EVM "send", not a GenVM contract call)
+# ============================================================================
+# `gl.get_contract_at(addr).emit_transfer(...)` (the pattern shown in
+# genvm's own docs/examples, and confusingly what `@gl.contract_interface`
+# — note: NOT `@gl.evm.contract_interface` — is aliased to in this pinned
+# runner) routes through GenVM's internal PostMessage mechanism, a CALL
+# convention meant for reaching other GenVM Intelligent Contracts, which
+# can optionally catch it via `__receive__`. A plain wallet (EOA) has no
+# deployed contract code to catch it, so that path fails against every
+# real user wallet ("Contract ... not found") while still decrementing
+# the sender's own GenVM-tracked balance — the GEN leaves the sender and
+# is not recoverable.
+#
+# The correct primitive for moving native GEN to ANY address (EOA or
+# contract) is `EthSend`, reached only through `@gl.evm.contract_interface`
+# (genlayer/py/evm — the actual EVM-bridge decorator; see
+# genlayer/gl/_internal/eth.py: evm_contract_interface). Declaring an
+# interface with empty View/Write and calling `.emit_transfer(value=...)`
+# on an instance issues a genuine EthSend, which is what actually updates
+# the recipient's balance on GenLayer Chain (the EVM-compatible L2).
+@gl.evm.contract_interface
+class _PayableRecipient:
+    class View:
+        pass
+
+    class Write:
+        pass
+
+
+def _send_gen(to_address: Address, amount: int) -> None:
+    """Send native GEN to any address via a real EthSend, not a GenVM call.
+
+    This is the single emission choke point — every payout in the
+    contract funnels through here, so the value-transfer mechanism can be
+    audited and changed in exactly one place.
+    """
+    if amount <= 0:
+        raise gl.vm.UserError(f"{ERR_EXPECTED}: transfer amount must be positive")
+    _PayableRecipient(to_address).emit_transfer(value=u256(amount))
+
+
+# ============================================================================
 # SECTION 3 — The contract
 # ============================================================================
 
@@ -1166,11 +1208,11 @@ Respond with ONLY a JSON object, no markdown, in exactly this shape:
         for record in self.reward_history:
             if record.recipient == recipient and not record.settled:
                 record.settled = True
-        # Native transfer out of contract balance. `get_contract_at` returns
-        # a proxy for ANY address (EOA or contract); emit_transfer sends
-        # value without calling a method.
-        gl.get_contract_at(recipient).emit_transfer(value=u256(amount),
-                                                    on="finalized")
+        # Native transfer out of contract balance — a real EthSend, so it
+        # correctly credits a plain wallet, not just a GenVM contract.
+        # Native transfer out of contract balance — a real EthSend, so it
+        # correctly credits a plain wallet, not just a GenVM contract.
+        _send_gen(recipient, amount)
         self.reward_history.append(RewardRecord(
             bounty_id=u32(0),
             submission_id=u32(0),

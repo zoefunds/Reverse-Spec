@@ -79,12 +79,41 @@ LOW_VERDICT = json.dumps({
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
 
+def _eth_send_hook(vm, request):
+    """Simulate a real EthSend: credit the recipient's actual balance,
+    debit the sender contract's. Without this, gl.contract_interface's
+    emit_transfer (EthSend) has no mock handler and the direct-test
+    harness silently no-ops it — exactly the class of gap that let a
+    real production bug (money leaving the contract's ledger but never
+    reaching the recipient's wallet) go undetected by 33 "passing" tests
+    that only ever checked internal claimable/history state, never an
+    actual balance movement.
+    """
+    send = request.get("EthSend")
+    if send is None:
+        return None
+    to_bytes = vm._to_bytes(send["address"])
+    value = int(send.get("value", 0))
+    vm._balances[to_bytes] = vm._balances.get(to_bytes, 0) + value
+    if vm._contract_address is not None:
+        vm._balances[vm._contract_address] = (
+            vm._balances.get(vm._contract_address, 0) - value)
+    return {"ok": None}
+
+
 @pytest.fixture()
 def vm():
     ctx = VMContext()
     ctx.sender = OWNER
+    ctx._gl_call_hook = _eth_send_hook
     with ctx.activate():
         yield ctx
+
+
+def wallet_balance(vm, address) -> int:
+    """Real wallet balance (distinct from the contract's internal
+    `claimable` ledger) — this is what actually proves GEN arrived."""
+    return vm._balances.get(vm._to_bytes(address), 0)
 
 
 @pytest.fixture()
@@ -429,10 +458,18 @@ class TestClaim:
         contract.finalize_bounty(bounty_id)
         expected = ESCROW * 9500 // 10000
         assert contract.get_claimable(SOLVER_A) == str(expected)
+        balance_before = wallet_balance(vm, SOLVER_A)
         vm.sender = SOLVER_A
         claimed = contract.claim_rewards()
         assert int(claimed) == expected
         assert contract.get_claimable(SOLVER_A) == "0"
+        # The actual point of claim_rewards: real GEN must land in the
+        # recipient's wallet, not just clear the contract's internal
+        # ledger. A prior contract version zeroed `claimable` correctly
+        # while routing the transfer through the wrong GenVM primitive
+        # (a contract-call convention, not a real send) — the ledger
+        # looked fully settled while the recipient's wallet stayed at 0.
+        assert wallet_balance(vm, SOLVER_A) == balance_before + expected
         history = contract.get_reward_history(SOLVER_A, 10)
         assert history[0]["kind"] == "CLAIM"
         assert all(h["settled"] for h in history if h["kind"] != "CLAIM")
