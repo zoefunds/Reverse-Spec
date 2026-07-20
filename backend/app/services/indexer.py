@@ -181,44 +181,45 @@ def run_cycle() -> None:
 
 _INDEXER_LOCK_KEY = 8214_7731_0042  # arbitrary fixed advisory-lock id
 
-def _try_acquire_leader_lock():
-    """Try to become the single indexing machine via a Postgres advisory
-    lock. Fly runs 2+ machines for HA; without this, every machine polls
-    the StudioNet RPC independently and multiplies read load for no
-    benefit — the exact thing that blew through the 500 req/hour RPC
-    rate limit in production. The lock is session-scoped: if this
-    machine dies, Postgres releases it automatically and another machine
-    picks up indexing on its next attempt. Returns an open connection
-    holding the lock, or None if another machine already holds it.
+
+def _run_cycle_if_leader() -> None:
+    """Acquire the leader lock, run one cycle if granted, release, done.
+
+    Deliberately does NOT hold the lock connection across cycles. An
+    earlier version held one long-lived connection for the process
+    lifetime and only re-checked it when first None; if that connection
+    silently died between cycles (idle timeout, network blip) Postgres
+    auto-released the lock server-side but the Python state never
+    noticed, so the process kept indexing on a stale belief that it was
+    still leader — and a second machine could then also acquire the
+    lock, giving two simultaneous "leaders" polling the RPC (observed in
+    production: both machines self-reported healthy while pg_locks
+    showed zero actual holders). Acquiring fresh every cycle and
+    releasing immediately after removes that whole class of drift: each
+    cycle's leadership is independently re-proven, never assumed.
     """
-    conn = get_engine().connect()
-    got = conn.exec_driver_sql(
-        "SELECT pg_try_advisory_lock(%s)", (_INDEXER_LOCK_KEY,)
-    ).scalar()
-    if got:
-        return conn
-    conn.close()
-    return None
+    with get_engine().connect() as conn:
+        got = conn.exec_driver_sql(
+            "SELECT pg_try_advisory_lock(%s)", (_INDEXER_LOCK_KEY,)
+        ).scalar()
+        if not got:
+            _status.update(state="standby", last_error=None)
+            return
+        try:
+            run_cycle()
+        finally:
+            conn.exec_driver_sql(
+                "SELECT pg_advisory_unlock(%s)", (_INDEXER_LOCK_KEY,))
 
 
 async def indexer_loop() -> None:
-    """Forever loop with jittered backoff; never lets an exception escape.
-
-    Only the machine holding the leader lock actually polls the chain;
-    others idle and retry acquiring the lock every cycle so a failover
-    is picked up automatically.
-    """
+    """Forever loop; never lets an exception escape (indexer must never
+    die — the API must stay up regardless of chain/DB health)."""
     settings = get_settings()
-    lock_conn = None
     while True:
-        if lock_conn is None:
-            lock_conn = await asyncio.to_thread(_try_acquire_leader_lock)
-            if lock_conn is None:
-                _status.update(state="standby", last_error=None)
-                await asyncio.sleep(settings.indexer_interval_seconds)
-                continue
         try:
-            await asyncio.to_thread(run_cycle)
+            await asyncio.to_thread(_run_cycle_if_leader)
         except Exception as exc:  # noqa: BLE001 — indexer must never die
+            _status.update(state="degraded", last_error=str(exc)[:300])
             logger.warning("indexer cycle failed", extra={"error": str(exc)})
         await asyncio.sleep(settings.indexer_interval_seconds)

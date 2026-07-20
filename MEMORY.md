@@ -93,3 +93,23 @@ contract line-by-line against it:
   for RPC quota headroom as bounty/address count grows. Non-leader
   machines now report indexer state "standby" (new, expected) rather than
   "degraded".
+
+## Indexer leader-election bug found and fixed post-deploy (2026-07-20)
+The first advisory-lock fix (held one long-lived connection per process,
+acquired once) had a real flaw: if that connection silently died between
+cycles (idle timeout / network blip), Postgres auto-released the lock
+server-side but the Python-side state never noticed, so the process kept
+calling run_cycle() on the stale belief it was still leader — and a second
+machine could then also acquire the lock. Confirmed in production: both
+machines self-reported indexer state "healthy" simultaneously while
+`pg_locks` showed ZERO actual advisory-lock holders at that moment.
+Fixed by acquiring and releasing the lock fresh every single cycle
+(`_run_cycle_if_leader`) instead of holding one connection for the process
+lifetime — each cycle's leadership is independently re-proven, never
+assumed. This also changes the design from "one sticky leader" to "one
+leader per cycle, may rotate between machines" — which is fine and
+actually more robust, since the real goal was never pinning leadership to
+one machine, only preventing simultaneous double-polling of the rate
+limited StudioNet RPC. Verified post-fix: zero "Rate limit exceeded" or
+"indexer cycle failed" log lines, /api/v1/stats fully synced and matching
+on-chain state, escrow invariant healthy.
