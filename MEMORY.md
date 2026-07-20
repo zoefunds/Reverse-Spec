@@ -73,3 +73,23 @@ contract line-by-line against it:
 - **This change is NOT yet deployed** — contract logic changed, so it
   needs a fresh StudioNet deployment by the user and a new address before
   going live, per the established workflow (Claude never deploys).
+
+## Contract v3 rollout (0xb5f4...037b) — abandonment recovery live (2026-07-20)
+- Address rolled out across repo, DB mirrors wiped, backend + frontend
+  redeployed. Full e2e rerun: 4 bounties (10k-50k GEN), abandonment-recovery
+  path exercised for real (solver_a called close_submissions instead of the
+  creator, who never touched the bounty) -> real consensus verdict
+  (DEEP_SOLUTION, composite 78) -> finalize -> 47,500 GEN claimed, zeroed
+  correctly. Invariant healthy.
+- Found and fixed a real production issue during rollout: StudioNet RPC has
+  a 500 req/hour limit; the indexer was running on both Fly machines AND
+  both had --workers 2 in the Dockerfile, so 4 processes were polling
+  independently (~4x the intended load), tripping the limit and reporting
+  "degraded". Fixed with a Postgres advisory-lock leader election
+  (`pg_try_advisory_lock`) so exactly one process indexes at a time —
+  verified via `pg_locks` that precisely one session holds the lock.
+  Dropped Dockerfile to --workers 1 (HA already comes from 2 Fly machines,
+  not workers-per-machine) and raised INDEXER_INTERVAL_SECONDS 30 -> 120
+  for RPC quota headroom as bounty/address count grows. Non-leader
+  machines now report indexer state "standby" (new, expected) rather than
+  "degraded".
