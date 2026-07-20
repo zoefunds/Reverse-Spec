@@ -3,7 +3,7 @@
 File: `contracts/reverse_spec_bounties.py` (single production contract,
 pinned `py-genlayer` runner, genvm-lint clean, schema-validated: 22 methods).
 
-StudioNet address: `0xb5f4C5C4B2162073fc1a0eA7de6EB9E0E9b8037b`
+StudioNet address: `0x1DD671F0b8Be9e6fB7e7F2078261e1B840AF4439`
 
 ## Writes
 

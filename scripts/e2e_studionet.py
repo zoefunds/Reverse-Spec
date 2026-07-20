@@ -16,7 +16,7 @@ from genlayer_py import create_account, create_client
 from genlayer_py.chains import studionet
 from genlayer_py.types import TransactionStatus
 
-CONTRACT = "0xb5f4C5C4B2162073fc1a0eA7de6EB9E0E9b8037b"
+CONTRACT = "0x1DD671F0b8Be9e6fB7e7F2078261e1B840AF4439"
 GEN = 10**18
 
 creator = create_account()

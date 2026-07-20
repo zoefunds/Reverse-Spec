@@ -89,5 +89,5 @@ acting in good faith to pay out.
 - `docs/` — architecture, API, contract reference, deployment guide
 - `MEMORY.md` — running log of every decision and every on-chain test run
 
-Live: contract `0xb5f4C5C4B2162073fc1a0eA7de6EB9E0E9b8037b` on StudioNet,
+Live: contract `0x1DD671F0b8Be9e6fB7e7F2078261e1B840AF4439` on StudioNet,
 frontend on Vercel, backend on Fly.io — see [README.md](README.md) for URLs.

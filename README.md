@@ -38,7 +38,7 @@ PostgreSQL (read-model: search, leaderboards, profiles)
 - **Contract** ([contracts/reverse_spec_bounties.py](contracts/reverse_spec_bounties.py)) — single
   1,477-line production contract; source of truth for bounties, escrow,
   evaluations, payouts. StudioNet address:
-  `0xb5f4C5C4B2162073fc1a0eA7de6EB9E0E9b8037b`
+  `0x1DD671F0b8Be9e6fB7e7F2078261e1B840AF4439`
 - **Backend** ([backend/](backend/)) — wallet-signature auth (SIWE-style),
   mirror API, chain indexer, health checks. Runs 24/7 on Fly.io
   (`auto_stop=off`, `min_machines_running=1`, health-check restarts).
