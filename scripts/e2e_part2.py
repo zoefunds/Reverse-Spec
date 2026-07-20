@@ -13,7 +13,7 @@ from genlayer_py import create_account, create_client
 from genlayer_py.chains import studionet
 from genlayer_py.types import TransactionStatus
 
-CONTRACT = "0x79F636e231D22ffFAE68c4FB9e69223287a5D2C4"
+CONTRACT = "0xb5f4C5C4B2162073fc1a0eA7de6EB9E0E9b8037b"
 GEN = 10**18
 KEYS = os.path.join(os.path.dirname(__file__), ".e2e_keys.json")
 

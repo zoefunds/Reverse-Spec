@@ -19,4 +19,8 @@ RUN useradd --create-home appuser
 USER appuser
 
 EXPOSE 8080
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "2"]
+# One worker per machine: HA comes from 2 Fly machines (min_machines_running=2
+# effectively via fly.toml), not from multiple workers within one machine.
+# Multiple workers here would multiply indexer_loop lifespan tasks per
+# machine and needlessly multiply advisory-lock contenders / DB connections.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]
