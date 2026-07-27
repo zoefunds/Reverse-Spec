@@ -8,19 +8,45 @@ discovers the *deeper* problem behind a spec and proves they solved it. The
 verdict — subjective, high-stakes, and money-moving — is decided by GenLayer's
 AI-validator consensus, not by any company or server.
 
+## Live
+
+| | |
+|---|---|
+| Frontend | https://reverse-spec.vercel.app |
+| Backend API | https://reverse-spec-api.fly.dev (`/healthz` for status) |
+| Contract (StudioNet) | `0x1DD671F0b8Be9e6fB7e7F2078261e1B840AF4439` |
+| Repo | https://github.com/zoefunds/Reverse-Spec |
+
+Proven live, not simulated: 4 funded bounties (10,000–50,000 GEN), a real
+consensus evaluation with written validator reasoning, and a payout verified
+by checking actual StudioNet wallet balances after claim — 47,500 GEN and
+2,500 GEN landed in the winner's and creator's real wallets, confirmed
+independently of the contract's own bookkeeping. See [MEMORY.md](MEMORY.md)
+for the full run log, including two real production bugs found and fixed
+during live testing (a broken native-transfer primitive, and an indexer
+RPC-quota exhaustion under multi-machine HA).
+
 ## Why this needs GenLayer
 
 - **Trustless adjudication of a subjective claim.** "You ignored the spec but
   solved the real problem" cannot be verified by `A == B` code. Independent
-  AI validators reach consensus on it via a tolerant leader/validator scheme.
+  AI validators reach consensus on it via a tolerant leader/validator scheme
+  that never requires byte-identical LLM output to agree.
 - **Real evidence, not prose.** Validators fetch every submission's public
   artifact (repo/gist/doc) *inside consensus* with GenVM web access and judge
-  the fetched content. Rationale text alone can never win.
+  the fetched content. Rationale text alone can never win; a dead or empty
+  link caps the evidence score automatically.
 - **A real value-transfer path.** Native GEN is escrowed in the contract at
   bounty creation (payable tx), split 85/10/5 on finalization, and claimed
-  with actual native transfers out of the contract. A strict conservation
-  invariant (`balance >= open escrow + unclaimed rewards`) is queryable
-  on-chain and monitored by the backend.
+  with a genuine EVM-layer `EthSend` (via `@gl.evm.contract_interface`) —
+  the primitive that actually credits a plain wallet, not GenVM's
+  contract-to-contract call convention. A strict conservation invariant
+  (`balance >= open escrow + unclaimed rewards`) is queryable on-chain and
+  polled by the backend indexer.
+- **Abandonment recovery.** `close_submissions` isn't creator-exclusive — any
+  solver with a live submission can also trigger it, so a creator who funds a
+  bounty and then goes silent can never permanently strand a solver's
+  unpaid work or the escrow itself.
 
 ## Architecture
 
@@ -36,12 +62,13 @@ PostgreSQL (read-model: search, leaderboards, profiles)
 ```
 
 - **Contract** ([contracts/reverse_spec_bounties.py](contracts/reverse_spec_bounties.py)) — single
-  1,477-line production contract; source of truth for bounties, escrow,
-  evaluations, payouts. StudioNet address:
-  `0x1DD671F0b8Be9e6fB7e7F2078261e1B840AF4439`
+  1,497-line production contract; source of truth for bounties, escrow,
+  evaluations, payouts.
 - **Backend** ([backend/](backend/)) — wallet-signature auth (SIWE-style),
-  mirror API, chain indexer, health checks. Runs 24/7 on Fly.io
-  (`auto_stop=off`, `min_machines_running=1`, health-check restarts).
+  mirror API, chain indexer, health checks. Runs 24/7 on Fly.io across 2
+  machines (`auto_stop=off`, `min_machines_running=1`, health-check
+  restarts); the indexer uses a Postgres advisory-lock leader election so
+  only one machine polls the chain RPC at a time, self-healing on failover.
 - **Frontend** ([frontend/](frontend/)) — Landing, Explorer, Bounty detail +
   submit, Create (escrow funding), Dashboard, Rewards + claim + leaderboard,
   Profiles, How-it-works. Wallet auth: MetaMask / Rainbow / Zerion.
@@ -69,7 +96,8 @@ npm run dev   # http://localhost:3000
 # contract lint + schema validation
 .venv/bin/genvm-lint check contracts/reverse_spec_bounties.py --json
 
-# contract direct tests (29)
+# contract direct tests (33) — includes a real EthSend mock that verifies
+# actual recipient balance movement, not just internal ledger state
 .venv/bin/pytest contracts-tests/direct/ -v
 
 # backend API tests (12)
@@ -77,6 +105,10 @@ cd backend && ../.venv/bin/pytest tests/ -v
 
 # frontend type-check + build
 cd frontend && npm run build
+
+# live smoke test against the deployed StudioNet contract (creates real
+# funded bounties — costs test GEN, StudioNet is gasless)
+.venv/bin/python scripts/e2e_full.py
 ```
 
 ## Documentation
@@ -87,4 +119,4 @@ cd frontend && npm run build
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — Fly.io (24/7) + Vercel + contract
 - [docs/API.md](docs/API.md) — REST endpoints
 - [docs/CONTRACT.md](docs/CONTRACT.md) — contract surface & consensus design
-- [MEMORY.md](MEMORY.md) — living project memory
+- [MEMORY.md](MEMORY.md) — living project memory & full test/deploy history
