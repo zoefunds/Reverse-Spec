@@ -236,9 +236,17 @@ three bounties in correct terminal states (`RESOLVED`, `CANCELLED`,
   applied via `release_command`.
 - Frontend (Vercel, `reverse-spec.vercel.app`): `NEXT_PUBLIC_CONTRACT_ADDRESS`
   and `NEXT_PUBLIC_ESCROW_ADDRESS` updated; redeployed to production.
-- `backend/relayer/` is not yet running as a standing service — it needs
-  to be deployed (e.g. as its own Fly machine or a background process)
-  with `BASE_SEPOLIA_RELAYER_PRIVATE_KEY` set as a secret before the
-  funding/settlement flow works unattended in production. During this
-  milestone's testing, funding and settlement were driven manually with
-  the same relayer key to prove the mechanism end-to-end.
+- `backend/relayer/` is deployed as its own standing Fly.io app
+  (`reverse-spec-relayer`, `always`-restart policy, no HTTP surface — a
+  pure background poller) with `BASE_SEPOLIA_RELAYER_PRIVATE_KEY` set as
+  a secret. It runs the funding relay (30s poll, 15s floor) and payout
+  relay (30s floor) loops continuously, so funding deposits and payout
+  settlements are relayed automatically going forward. Three bugs were
+  found and fixed while deploying it: `dotenv` was imported but not
+  declared as a dependency; the poll `setInterval`s were `.unref()`'d
+  (fine for tests, fatal for a long-running service — Node exits once
+  nothing else holds the event loop open); and the read-only GenLayer
+  client had no account, which GenLayer's RPC requires even for reads.
+  A `[[restart]] policy = "always"` was also added to `fly.toml` so a
+  future crash recovers automatically instead of leaving the machine
+  stopped.
