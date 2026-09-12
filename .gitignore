@@ -12,6 +12,11 @@ node_modules/
 .next/
 out/
 .vercel/
+*.tsbuildinfo
+
+# Relayer local state / generated artifacts
+backend/relayer/relayer-state.json
+contracts/base/ReverseSpecEscrow.abi.json
 
 # Env & secrets
 .env

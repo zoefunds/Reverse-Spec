@@ -1,10 +1,11 @@
 """End-to-end protocol test against the DEPLOYED StudioNet contract.
 
 Exercises every flow the website exposes, with realistic professional
-content: create 4 funded bounties (10k-50k GEN), submit solutions with
+content: create 4 funded bounties (10-50 USDC), submit solutions with
 real public evidence URLs, close, run consensus evaluations (real LLM +
-real web fetch on StudioNet validators), finalize payouts, claim rewards,
-and verify the escrow invariant end to end.
+real web fetch on StudioNet validators), finalize payouts, mark them
+settled via the relayer-only mark_settled call, and verify the escrow
+invariant end to end.
 
 Run:  .venv/bin/python scripts/e2e_studionet.py
 """
@@ -17,7 +18,7 @@ from genlayer_py.chains import studionet
 from genlayer_py.types import TransactionStatus
 
 CONTRACT = "0x1DD671F0b8Be9e6fB7e7F2078261e1B840AF4439"
-GEN = 10**18
+USDC = 10**6
 
 creator = create_account()
 solver_a = create_account()
@@ -74,7 +75,7 @@ BOUNTIES = [
         ),
         category="DeFi",
         tags="mev,dex,orderflow,slippage",
-        escrow=50_000 * GEN,
+        escrow=50 * USDC,
         deadline="2026-09-15",
     ),
     dict(
@@ -97,7 +98,7 @@ BOUNTIES = [
         ),
         category="Infra",
         tags="serverless,gpu,latency,inference",
-        escrow=35_000 * GEN,
+        escrow=35 * USDC,
         deadline="2026-09-01",
     ),
     dict(
@@ -120,7 +121,7 @@ BOUNTIES = [
         ),
         category="Tooling",
         tags="webhooks,reliability,events,api-design",
-        escrow=18_000 * GEN,
+        escrow=18 * USDC,
         deadline="2026-08-30",
     ),
     dict(
@@ -143,7 +144,7 @@ BOUNTIES = [
         ),
         category="Security",
         tags="audit,static-analysis,solidity,tooling",
-        escrow=10_000 * GEN,
+        escrow=10 * USDC,
         deadline="2026-10-01",
     ),
 ]
@@ -239,21 +240,25 @@ def main() -> None:
 
     # ---- 1. create 4 bounties (payable escrow) -----------------------------
     bounty_ids = []
-    for b in BOUNTIES:
+    for i, b in enumerate(BOUNTIES):
         write(c_creator, "create_bounty",
               [b["title"], b["spec"], b["true_problem"], b["category"],
-               b["tags"], "2026-07-17", b["deadline"]],
-              value=b["escrow"],
+               b["tags"], "2026-07-17", b["deadline"], 3600],
               label=f"create_bounty '{b['title'][:48]}…' "
-                    f"({b['escrow'] // GEN:,} GEN)")
+                    f"({b['escrow'] / USDC:,.2f} USDC)")
         stats = read("get_platform_stats")
-        bounty_ids.append(int(stats["bounties_total"]))
+        bounty_id = int(stats["bounties_total"])
+        bounty_ids.append(bounty_id)
+        write(c_creator, "record_funding",
+              [bounty_id, creator.address, b["escrow"], f"0xe2e-fund-{bounty_id}-{i}"],
+              label=f"record_funding bounty {bounty_id} ({b['escrow'] / USDC:,.2f} USDC)")
+        stats = read("get_platform_stats")
         print(f"  bounty id={bounty_ids[-1]} open_escrow="
-              f"{int(stats['open_escrow']) // GEN:,} GEN")
+              f"{int(stats['open_escrow']) / USDC:,.2f} USDC")
 
     inv = read("check_escrow_invariant")
     print(f"invariant after funding: healthy={inv['healthy']} "
-          f"open={int(inv['open_escrow']) // GEN:,} GEN")
+          f"open={int(inv['open_escrow']) / USDC:,.2f} USDC")
 
     # ---- 2. submissions -----------------------------------------------------
     submission_ids = {}
@@ -283,12 +288,19 @@ def main() -> None:
     print(f"  bounty {target}: {bounty['status']} — "
           f"{bounty['resolution_summary'][:160]}")
 
-    claimable = int(read("get_claimable", [solver_a.address]))
-    print(f"  solver_a claimable: {claimable // GEN:,} GEN")
-    if claimable > 0:
-        write(c_solver_a, "claim_rewards", [], label="claim_rewards (solver_a)")
-        after = int(read("get_claimable", [solver_a.address]))
-        print(f"  claimable after claim: {after}")
+    payouts = read("get_base_payouts", [target])
+    print(f"  base_payouts for bounty {target}: {payouts}")
+    solver_a_payout = next(
+        (p for p in payouts if p["recipient"].lower() == solver_a.address.lower()),
+        None)
+    assert solver_a_payout is not None, "solver_a missing from get_base_payouts"
+    print(f"  solver_a payout: {int(solver_a_payout['amount']) / USDC:,.2f} USDC")
+
+    write(c_creator, "mark_settled", [target, f"0xe2e-settle-{target}"],
+          label=f"mark_settled bounty {target}")
+    payouts_after = read("get_base_payouts", [target])
+    print(f"  base_payouts after mark_settled: {payouts_after} "
+          f"({'PASS — emptied' if not payouts_after else 'FAIL — not emptied'})")
 
     # ---- 4. final state -----------------------------------------------------
     inv = read("check_escrow_invariant")
@@ -296,8 +308,8 @@ def main() -> None:
     print("\n==== FINAL STATE ====")
     print(f"bounties={stats['bounties_total']} "
           f"submissions={stats['submissions_total']} "
-          f"open_escrow={int(stats['open_escrow']) // GEN:,} GEN "
-          f"unclaimed={int(stats['unclaimed_rewards']) // GEN:,} GEN")
+          f"open_escrow={int(stats['open_escrow']) / USDC:,.2f} USDC "
+          f"unclaimed={int(stats['unclaimed_rewards']) / USDC:,.2f} USDC")
     print(f"invariant healthy={inv['healthy']}")
     print(f"elapsed: {time.time() - t0:.0f}s")
 

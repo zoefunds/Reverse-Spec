@@ -1,6 +1,7 @@
 /** Formatting helpers (GEN amounts, addresses, tiers). */
 
 const GEN_DECIMALS = 18n;
+const USDC_DECIMALS = 6n;
 
 /** base units -> human GEN string, trimmed to 4 significant decimals. */
 export function formatGen(baseUnits: string | bigint): string {
@@ -29,6 +30,66 @@ export function parseGen(input: string): bigint {
     BigInt(whole) * 10n ** GEN_DECIMALS +
     BigInt(frac.padEnd(18, "0") || "0")
   );
+}
+
+/** base units (6 decimals) -> human USDC string, trimmed to 4 sig decimals. */
+export function formatUsdc(baseUnits: string | bigint): string {
+  let v: bigint;
+  try {
+    v = typeof baseUnits === "bigint" ? baseUnits : BigInt(baseUnits || "0");
+  } catch {
+    return "0";
+  }
+  const denom = 10n ** USDC_DECIMALS;
+  const whole = v / denom;
+  const frac = v % denom;
+  if (frac === 0n) return whole.toLocaleString();
+  const fracStr = (frac + denom).toString().slice(1, 5).replace(/0+$/, "");
+  return `${whole.toLocaleString()}${fracStr ? "." + fracStr : ""}`;
+}
+
+/** human USDC string -> base units (6 decimals; throws on malformed input). */
+export function parseUsdc(input: string): bigint {
+  const cleaned = input.trim();
+  if (!/^\d+(\.\d{1,6})?$/.test(cleaned)) {
+    throw new Error("Enter a valid USDC amount, e.g. 25.00");
+  }
+  const [whole, frac = ""] = cleaned.split(".");
+  return (
+    BigInt(whole) * 10n ** USDC_DECIMALS +
+    BigInt(frac.padEnd(6, "0") || "0")
+  );
+}
+
+/**
+ * The real, contract-enforced submission deadline (unix seconds,
+ * `opened_at + submission_window_secs`) — distinct from `deadline_note`,
+ * a cosmetic creator-typed date with no bearing on when
+ * `close_submissions` actually unlocks. Renders full date + time so it's
+ * unambiguous, since the window can be as short as 1 hour.
+ */
+export function formatDeadline(unixSeconds: number): string {
+  if (!unixSeconds) return "—";
+  return new Date(unixSeconds * 1000).toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+}
+
+/** Human "closes in 42m" / "closed 3h ago" relative to now. */
+export function formatCountdown(unixSeconds: number): string {
+  if (!unixSeconds) return "—";
+  const diffMs = unixSeconds * 1000 - Date.now();
+  const past = diffMs < 0;
+  const abs = Math.abs(diffMs);
+  const mins = Math.round(abs / 60000);
+  const label =
+    mins < 60
+      ? `${mins}m`
+      : mins < 1440
+        ? `${Math.round(mins / 60)}h`
+        : `${Math.round(mins / 1440)}d`;
+  return past ? `closed ${label} ago` : `closes in ${label}`;
 }
 
 export function shortAddress(addr?: string | null): string {

@@ -11,7 +11,7 @@ import {
 } from "@/components/ui";
 import { api, type Bounty, type Submission } from "@/lib/api";
 import { readContract } from "@/lib/chain";
-import { formatGen, shortAddress } from "@/lib/format";
+import { formatUsdc, shortAddress } from "@/lib/format";
 import { useWallet } from "@/lib/wallet";
 
 export default function DashboardPage() {
@@ -66,14 +66,14 @@ export default function DashboardPage() {
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard label="Claimable" accent="text-success"
-          value={`${formatGen(claimable)} GEN`}
+          value={`${formatUsdc(claimable)} USDC`}
           sub={claimable !== "0" ? "Claim on the Rewards page" : undefined} />
         <StatCard label="Submissions"
           value={stats ? stats.submissions_total : "—"} />
         <StatCard label="Wins" accent="text-tertiary"
           value={stats ? stats.wins : "—"} />
         <StatCard label="Earned" accent="text-secondary"
-          value={stats ? `${formatGen(stats.earned_total)} GEN` : "—"} />
+          value={stats ? `${formatUsdc(stats.earned_total)} USDC` : "—"} />
       </div>
 
       <section className="flex flex-col gap-4">

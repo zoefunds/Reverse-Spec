@@ -8,7 +8,7 @@ import { DiffPane, StatCard } from "@/components/ui";
 import { Button } from "@/components/ui";
 import { api } from "@/lib/api";
 import { readContract } from "@/lib/chain";
-import { formatGen } from "@/lib/format";
+import { formatUsdc } from "@/lib/format";
 
 interface PlatformStats {
   bounties_total: number;
@@ -24,7 +24,7 @@ const STEPS = [
   {
     n: "01",
     title: "Fund the problem",
-    body: "A creator escrows native GEN into the Intelligent Contract with the literal spec — and optionally their guess at the deeper problem.",
+    body: "A creator creates the bounty on GenLayer with the literal spec — and optionally their guess at the deeper problem — then funds it with USDC on a Base Sepolia escrow.",
   },
   {
     n: "02",
@@ -39,7 +39,7 @@ const STEPS = [
   {
     n: "04",
     title: "Value moves on-chain",
-    body: "85% of escrow to the winner, 10% to the runner-up, 5% back to the creator. Claims are real GEN transfers out of the contract.",
+    body: "85% of escrow to the winner, 10% to the runner-up, 5% back to the creator. Claims are real USDC transfers straight from the Base Sepolia escrow.",
   },
 ];
 
@@ -123,9 +123,9 @@ export default function LandingPage() {
         <StatCard label="Open bounties" accent="text-primary"
           value={stats ? stats.bounties_open : "—"} />
         <StatCard label="Escrow live" accent="text-tertiary"
-          value={stats ? `${formatGen(stats.open_escrow)} GEN` : "—"} />
+          value={stats ? `${formatUsdc(stats.open_escrow)} USDC` : "—"} />
         <StatCard label="Paid to solvers" accent="text-success"
-          value={stats ? `${formatGen(stats.total_paid_out)} GEN` : "—"} />
+          value={stats ? `${formatUsdc(stats.total_paid_out)} USDC` : "—"} />
         <StatCard label="Solvers" accent="text-secondary"
           value={stats ? stats.solvers_total : "—"} />
       </section>

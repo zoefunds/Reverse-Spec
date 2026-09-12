@@ -39,6 +39,15 @@ class Settings(BaseSettings):
     genlayer_network: str = "studionet"       # studionet | localnet
     indexer_interval_seconds: int = 30
     indexer_enabled: bool = True
+    # Comma-separated chain_bounty_ids to keep out of the mirror entirely
+    # (and therefore off the API/explorer). On-chain history is immutable —
+    # this only controls what this product's UI surfaces, e.g. bounties
+    # created while validating a new deployment before real users arrive.
+    hidden_bounty_ids: str = ""
+
+    @property
+    def hidden_bounty_id_set(self) -> set[int]:
+        return {int(x) for x in self.hidden_bounty_ids.split(",") if x.strip()}
 
     # --- rate limiting --------------------------------------------------------
     rate_limit_default: str = "120/minute"

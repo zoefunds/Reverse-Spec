@@ -76,6 +76,9 @@ class BountyMirror(Base):
     status: Mapped[str] = mapped_column(String(20), index=True,
                                         default="OPEN")
     deadline_note: Mapped[str] = mapped_column(String(48), default="")
+    submission_window_secs: Mapped[int] = mapped_column(Integer, default=0)
+    opened_at: Mapped[int] = mapped_column(Integer, default=0)
+    submission_deadline: Mapped[int] = mapped_column(Integer, default=0)
     submission_count: Mapped[int] = mapped_column(Integer, default=0)
     evaluated_count: Mapped[int] = mapped_column(Integer, default=0)
     winner_submission_id: Mapped[int] = mapped_column(Integer, default=0)

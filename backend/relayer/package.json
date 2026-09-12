@@ -1,0 +1,14 @@
+{
+  "name": "reverse-spec-relayer",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Bridges Base Sepolia USDC escrow (ReverseSpecEscrow.sol) and the GenLayer ReverseSpecBounties contract. GenLayer judges; this relayer confirms funding one direction and relays payout instructions the other. Never decides who gets paid itself.",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "ethers": "^6.13.0",
+    "genlayer-js": "^0.16.0"
+  }
+}

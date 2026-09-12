@@ -1,10 +1,11 @@
 """Full E2E protocol test against the redeployed StudioNet contract.
 
-Creates 4 professional bounties (10k-50k GEN), 4 submissions with real
+Creates 4 professional bounties (10-50 USDC), 4 submissions with real
 public evidence, then runs the COMPLETE lifecycle on bounty 1: close ->
-consensus evaluation (real web fetch + LLM) -> finalize -> claim, with a
-post-claim assertion that the claimable balance zeroes (the bug fixed in
-this contract revision). Bounties 2-4 remain OPEN as live inventory.
+consensus evaluation (real web fetch + LLM) -> finalize -> mark_settled,
+with a post-settlement assertion that get_base_payouts empties (payouts
+are now instructions for a separate Base Sepolia escrow contract, not
+on-chain GEN claims). Bounties 2-4 remain OPEN as live inventory.
 
 Run:  .venv/bin/python scripts/e2e_full.py
 """
@@ -19,7 +20,7 @@ from genlayer_py.chains import studionet
 from genlayer_py.types import TransactionStatus
 
 CONTRACT = "0x1DD671F0b8Be9e6fB7e7F2078261e1B840AF4439"
-GEN = 10**18
+USDC = 10**6
 KEYS = os.path.join(os.path.dirname(__file__), ".e2e_keys_v2.json")
 
 if os.path.exists(KEYS):
@@ -76,7 +77,7 @@ BOUNTIES = [
              "orderflow, batch auctions, or intent-based routing rather "
              "than a smarter slider.",
         category="DeFi", tags="mev,dex,orderflow,slippage",
-        escrow=50_000 * GEN, deadline="2026-09-15",
+        escrow=50 * USDC, deadline="2026-09-15",
     ),
     dict(
         title="Cut cold-start latency for our serverless inference platform below 400ms",
@@ -94,7 +95,7 @@ BOUNTIES = [
              "or GPU memory pooling could remove the cold start itself "
              "instead of paying to hide it.",
         category="Infra", tags="serverless,gpu,latency,inference",
-        escrow=35_000 * GEN, deadline="2026-09-01",
+        escrow=35 * USDC, deadline="2026-09-01",
     ),
     dict(
         title="Stop customer churn caused by our webhook delivery failures",
@@ -111,7 +112,7 @@ BOUNTIES = [
              "(cursor + replay), or signed event bundles with idempotency "
              "keys, might remove the failure class entirely.",
         category="Tooling", tags="webhooks,reliability,events,api-design",
-        escrow=18_000 * GEN, deadline="2026-08-30",
+        escrow=18 * USDC, deadline="2026-08-30",
     ),
     dict(
         title="Reduce false positives in our smart-contract audit scanner",
@@ -130,7 +131,7 @@ BOUNTIES = [
              "generation, could verify exploitability instead of guessing "
              "at it.",
         category="Security", tags="audit,static-analysis,solidity,tooling",
-        escrow=10_000 * GEN, deadline="2026-10-01",
+        escrow=10 * USDC, deadline="2026-10-01",
     ),
 ]
 
@@ -203,14 +204,17 @@ def main():
     print(f"config ok — win_threshold={cfg['win_threshold']}", flush=True)
 
     bounty_ids = []
-    for b in BOUNTIES:
+    for i, b in enumerate(BOUNTIES):
         write(c_creator, "create_bounty",
               [b["title"], b["spec"], b["true_problem"], b["category"],
-               b["tags"], "2026-07-17", b["deadline"]],
-              value=b["escrow"],
-              label=f"create_bounty ({b['escrow'] // GEN:,} GEN) "
+               b["tags"], "2026-07-17", b["deadline"], 3600],
+              label=f"create_bounty ({b['escrow'] / USDC:,.2f} USDC) "
                     f"{b['title'][:44]}…")
-        bounty_ids.append(int(read("get_platform_stats")["bounties_total"]))
+        bounty_id = int(read("get_platform_stats")["bounties_total"])
+        bounty_ids.append(bounty_id)
+        write(c_creator, "record_funding",
+              [bounty_id, creator.address, b["escrow"], f"0xe2e-fund-{bounty_id}-{i}"],
+              label=f"record_funding bounty {bounty_id} ({b['escrow'] / USDC:,.2f} USDC)")
         print(f"   bounty id={bounty_ids[-1]}", flush=True)
 
     sub_ids = {}
@@ -221,7 +225,7 @@ def main():
               label=f"submit_solution -> bounty {bounty_ids[idx]}")
         sub_ids[idx] = int(read("get_platform_stats")["submissions_total"])
 
-    # Full lifecycle on bounty 1 (50,000 GEN, MEV). Exercises the new
+    # Full lifecycle on bounty 1 (50.00 USDC, MEV). Exercises the new
     # abandonment-recovery path: the CREATOR never calls close_submissions
     # here — the submitter (solver_a) does, proving a vanished creator
     # can no longer permanently strand escrow + unpaid work.
@@ -241,42 +245,34 @@ def main():
     print(f"   {read('get_bounty', [b1])['resolution_summary'][:180]}",
           flush=True)
 
-    claimable = int(read("get_claimable", [solver_a.address]))
-    print(f"   solver_a claimable: {claimable / GEN:,.0f} GEN", flush=True)
-    if claimable:
-        wallet_before = c_creator.get_balance(account=solver_a.address)
-        print(f"   solver_a REAL wallet balance before claim: "
-              f"{wallet_before / GEN:,.4f} GEN", flush=True)
-        write(c_solver_a, "claim_rewards", [], label="claim_rewards")
-        after_ledger = int(read("get_claimable", [solver_a.address]))
-        wallet_after = c_creator.get_balance(account=solver_a.address)
-        gained = wallet_after - wallet_before
-        print(f"   claimable ledger after claim: {after_ledger} "
-              f"({'zeroed' if after_ledger == 0 else 'FAIL — not zeroed'})",
-              flush=True)
-        print(f"   solver_a REAL wallet balance after claim: "
-              f"{wallet_after / GEN:,.4f} GEN (gained {gained / GEN:,.4f} GEN)",
-              flush=True)
-        print(f"   >>> WALLET-BALANCE CHECK: "
-              f"{'PASS — GEN actually arrived' if gained == claimable else 'FAIL — GEN did NOT arrive'} <<<",
-              flush=True)
+    payouts = read("get_base_payouts", [b1])
+    print(f"   base_payouts for bounty {b1}: {payouts}", flush=True)
+    solver_a_payout = next(
+        (p for p in payouts if p["recipient"].lower() == solver_a.address.lower()),
+        None)
+    assert solver_a_payout is not None, "solver_a missing from get_base_payouts"
+    print(f"   solver_a payout: {int(solver_a_payout['amount']) / USDC:,.2f} USDC",
+          flush=True)
 
-    creator_claim = int(read("get_claimable", [creator.address]))
-    if creator_claim:
-        write(c_creator, "claim_rewards", [], label="claim_rewards (creator reserve)")
+    write(c_creator, "mark_settled", [b1, f"0xe2e-settle-{b1}"],
+          label=f"mark_settled bounty {b1}")
+    payouts_after = read("get_base_payouts", [b1])
+    print(f"   base_payouts after mark_settled: {payouts_after} "
+          f"({'PASS — emptied' if not payouts_after else 'FAIL — not emptied'})",
+          flush=True)
 
     inv = read("check_escrow_invariant")
     stats = read("get_platform_stats")
     print("\n==== FINAL STATE ====", flush=True)
     print(f"bounties={stats['bounties_total']} "
           f"submissions={stats['submissions_total']} "
-          f"open_escrow={int(stats['open_escrow']) / GEN:,.0f} GEN "
-          f"unclaimed={int(stats['unclaimed_rewards']) / GEN:,.0f} GEN "
-          f"paid_out={int(stats['total_paid_out']) / GEN:,.0f} GEN",
+          f"open_escrow={int(stats['open_escrow']) / USDC:,.2f} USDC "
+          f"unclaimed={int(stats['unclaimed_rewards']) / USDC:,.2f} USDC "
+          f"paid_out={int(stats['total_paid_out']) / USDC:,.2f} USDC",
           flush=True)
     print(f"invariant healthy={inv['healthy']} "
-          f"balance={int(inv['contract_balance']) / GEN:,.0f} "
-          f"obligations={int(inv['obligations']) / GEN:,.0f}", flush=True)
+          f"tracked_open={int(inv['tracked_open_escrow']) / USDC:,.2f} "
+          f"summed_open={int(inv['summed_bounty_escrow']) / USDC:,.2f}", flush=True)
     board = read("get_leaderboard", [3])
     print(f"leaderboard: {board}", flush=True)
     print(f"elapsed {time.time() - t0:.0f}s", flush=True)

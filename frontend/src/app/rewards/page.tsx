@@ -1,6 +1,14 @@
 "use client";
 
-/** Rewards — claim native GEN + reward ledger + leaderboard. */
+/**
+ * Rewards — claim USDC payouts from the Base Sepolia escrow.
+ *
+ * `claim_rewards` no longer exists on the GenLayer contract: payouts are
+ * held in the escrow's `claimable(bountyId, account)` mapping and pulled
+ * out per-bounty via the escrow's own `claim(bountyId)`. We derive the set
+ * of bounties worth checking from the reward history the indexer already
+ * tracks, then read claimable balances straight from Base Sepolia.
+ */
 
 import { useCallback, useEffect, useState } from "react";
 
@@ -8,52 +16,71 @@ import {
   Button, Card, EmptyState, StatCard, Tag,
 } from "@/components/ui";
 import { api, type LeaderboardRow, type RewardEvent } from "@/lib/api";
-import { readContract, waitForTx, writeContract } from "@/lib/chain";
-import { formatGen, shortAddress } from "@/lib/format";
+import { claimPayout, getClaimable } from "@/lib/baseSepolia";
+import { formatUsdc, shortAddress } from "@/lib/format";
 import { useWallet } from "@/lib/wallet";
+
+interface ClaimRow {
+  chain_bounty_id: number;
+  claimable: bigint;
+}
 
 export default function RewardsPage() {
   const { address, connect } = useWallet();
-  const [claimable, setClaimable] = useState<string>("0");
+  const [claims, setClaims] = useState<ClaimRow[] | null>(null);
   const [history, setHistory] = useState<RewardEvent[]>([]);
   const [board, setBoard] = useState<LeaderboardRow[]>([]);
-  const [phase, setPhase] = useState<"idle" | "signing" | "pending" | "done">("idle");
+  const [claimingId, setClaimingId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
     api.leaderboard().then(setBoard).catch(() => setBoard([]));
-    if (!address) return;
-    readContract<string>("get_claimable", [address])
-      .then((v) => setClaimable(String(v))).catch(() => null);
-    api.rewards(address.toLowerCase()).then(setHistory)
-      .catch(() => setHistory([]));
+    if (!address) { setClaims(null); return; }
+    const hist = await api.rewards(address.toLowerCase()).catch(() => [] as RewardEvent[]);
+    setHistory(hist);
+
+    const bountyIds = Array.from(new Set(hist.map((r) => r.chain_bounty_id)))
+      .filter((id) => id > 0);
+    try {
+      const rows = await Promise.all(bountyIds.map(async (id) => ({
+        chain_bounty_id: id,
+        claimable: await getClaimable(id, address).catch(() => 0n),
+      })));
+      setClaims(rows.filter((r) => r.claimable > 0n));
+    } catch {
+      setClaims([]);
+    }
   }, [address]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
-  async function claim() {
+  async function claim(row: ClaimRow) {
     if (!address) { await connect(); return; }
     setError(null);
-    setPhase("signing");
+    setNotice(null);
+    setClaimingId(row.chain_bounty_id);
     try {
-      const hash = await writeContract(address, "claim_rewards", []);
-      setPhase("pending");
-      await waitForTx(hash);
-      setPhase("done");
-      load();
+      await claimPayout(address, row.chain_bounty_id);
+      setNotice(`Claimed ${formatUsdc(row.claimable)} USDC for bounty #${row.chain_bounty_id}.`);
+      await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Claim failed");
-      setPhase("idle");
+    } finally {
+      setClaimingId(null);
     }
   }
+
+  const totalClaimable = (claims ?? []).reduce((sum, r) => sum + r.claimable, 0n);
 
   return (
     <div className="flex flex-col gap-8">
       <header>
         <h1 className="font-head text-h1 text-ink">Rewards</h1>
         <p className="mt-1 text-ink-soft">
-          Escrow leaves the contract only two ways: consensus payouts and
-          creator reclaims. Claims below are real GEN transfers to your wallet.
+          GenLayer judges submissions; payouts settle as USDC on the Base
+          Sepolia escrow. Claims below are real USDC transfers straight from
+          that contract to your wallet — GenLayer never touches the funds.
         </p>
       </header>
 
@@ -64,32 +91,50 @@ export default function RewardsPage() {
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <span className="font-mono text-tag uppercase text-ink-faint">
-                  Claimable balance
+                  Total claimable
                 </span>
                 <div className="font-head text-display text-primary">
-                  {formatGen(claimable)} <span className="text-h3">GEN</span>
+                  {formatUsdc(totalClaimable)} <span className="text-h3">USDC</span>
                 </div>
               </div>
-              {address ? (
-                <Button onClick={() => void claim()}
-                  disabled={claimable === "0"}
-                  busy={phase === "signing" || phase === "pending"}>
-                  {phase === "signing" ? "Confirm in wallet…"
-                    : phase === "pending" ? "Transferring…"
-                    : "Claim to wallet"}
-                </Button>
-              ) : (
-                <Button onClick={() => void connect()}>Connect Wallet</Button>
-              )}
+              {!address && <Button onClick={() => void connect()}>Connect Wallet</Button>}
             </div>
             {error && (
               <p className="mt-3 rounded border border-danger/40 bg-danger/10 p-2.5 font-mono text-tag text-danger">
                 {error}
               </p>
             )}
-            {phase === "done" && (
+            {notice && (
               <p className="mt-3 rounded border border-success/40 bg-success/10 p-2.5 font-mono text-tag text-success">
-                CLAIMED — GEN transferred to {shortAddress(address)}.
+                {notice}
+              </p>
+            )}
+
+            {address && claims !== null && claims.length > 0 && (
+              <div className="mt-4 flex flex-col gap-2">
+                {claims.map((row) => (
+                  <div key={row.chain_bounty_id}
+                    className="flex items-center justify-between rounded border border-line-soft p-3">
+                    <div>
+                      <div className="font-mono text-sm text-ink">
+                        Bounty #{row.chain_bounty_id}
+                      </div>
+                      <div className="font-mono text-tag text-tertiary">
+                        {formatUsdc(row.claimable)} USDC claimable
+                      </div>
+                    </div>
+                    <Button onClick={() => void claim(row)}
+                      busy={claimingId === row.chain_bounty_id}>
+                      {claimingId === row.chain_bounty_id
+                        ? "Confirm in wallet…" : "Claim to wallet"}
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {address && claims !== null && claims.length === 0 && (
+              <p className="mt-4 text-sm text-ink-soft">
+                Nothing claimable right now.
               </p>
             )}
           </Card>
@@ -124,7 +169,7 @@ export default function RewardsPage() {
                         </td>
                         <td className="px-5 py-3"><Tag>{r.kind}</Tag></td>
                         <td className="px-5 py-3 text-ink">
-                          {formatGen(r.amount)} GEN
+                          {formatUsdc(r.amount)} USDC
                         </td>
                         <td className="px-5 py-3">
                           <span className={r.settled ? "text-success" : "text-warning"}>
@@ -171,7 +216,7 @@ export default function RewardsPage() {
                       </p>
                     </div>
                     <span className="font-mono text-tag text-tertiary">
-                      {formatGen(row.earned_total)}
+                      {formatUsdc(row.earned_total)}
                     </span>
                   </div>
                 ))}

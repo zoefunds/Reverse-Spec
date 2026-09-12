@@ -6,6 +6,14 @@ from genlayer import *
 import json
 import typing
 from dataclasses import dataclass
+from datetime import datetime, timezone
+
+
+def _now_ts() -> int:
+    """Deterministic transaction-time Unix timestamp (see GenVM docs:
+    Transaction Context — the clock is pinned to the tx datetime, so every
+    validator re-executing this sees the same value)."""
+    return int(datetime.now(timezone.utc).timestamp())
 
 
 # ============================================================================
@@ -15,14 +23,16 @@ from dataclasses import dataclass
 # favors sized primitives over Python enums.
 
 # --- Bounty lifecycle -------------------------------------------------------
-BOUNTY_OPEN: int = 0          # accepting submissions
+BOUNTY_PENDING_FUNDING: int = 6  # created, awaiting confirmed USDC deposit on Base
+BOUNTY_OPEN: int = 0          # funded, accepting submissions
 BOUNTY_EVALUATING: int = 1    # submissions closed, evaluations running
-BOUNTY_RESOLVED: int = 2      # winner paid (or split paid)
+BOUNTY_RESOLVED: int = 2      # winner selected (payout instruction available)
 BOUNTY_UNRESOLVED: int = 3    # evaluated, nothing met the bar; escrow reclaimable
 BOUNTY_CANCELLED: int = 4     # cancelled before any submission; escrow refunded
 BOUNTY_RECLAIMED: int = 5     # unresolved and creator has reclaimed escrow
 
 BOUNTY_STATUS_NAMES: dict = {
+    BOUNTY_PENDING_FUNDING: "PENDING_FUNDING",
     BOUNTY_OPEN: "OPEN",
     BOUNTY_EVALUATING: "EVALUATING",
     BOUNTY_RESOLVED: "RESOLVED",
@@ -30,6 +40,10 @@ BOUNTY_STATUS_NAMES: dict = {
     BOUNTY_CANCELLED: "CANCELLED",
     BOUNTY_RECLAIMED: "RECLAIMED",
 }
+
+# --- Terminal statuses whose payout instructions may be relayed to Base -----
+TERMINAL_PAYOUT_STATUSES: tuple = (BOUNTY_RESOLVED, BOUNTY_UNRESOLVED,
+                                    BOUNTY_CANCELLED, BOUNTY_RECLAIMED)
 
 # --- Submission lifecycle ---------------------------------------------------
 SUB_PENDING: int = 0          # submitted, not yet evaluated
@@ -67,18 +81,26 @@ TIER_NAMES: dict = {
 }
 
 # --- Consensus tolerances (the anti-UNDETERMINED knobs) ---------------------
-SCORE_TOLERANCE: int = 20      # |leader_score - validator_score| accepted delta
+# SCORE_TOLERANCE was 20; tightened to 12 so a leader/validator pair can no
+# longer "agree" across a materially different read of the same submission.
+SCORE_TOLERANCE: int = 12      # |leader_score - validator_score| accepted delta
 TIER_TOLERANCE: int = 1        # adjacent tiers are considered agreeing
 SCORE_BAND_WIDTH: int = 5      # scores are rounded to bands of this width
 
-# --- Economic parameters ----------------------------------------------------
-MIN_BOUNTY_ESCROW: int = 10**15          # 0.001 GEN — spam floor, StudioNet-friendly
+# --- Economic parameters -----------------------------------------------------
+# Funding currency is USDC (6 decimals) held in escrow on Base Sepolia, not
+# native GEN. Amounts below are USDC base units (1_000_000 == 1.00 USDC).
+MIN_BOUNTY_ESCROW: int = 1_000_000       # 1.00 USDC — spam floor
 MAX_SUBMISSIONS_PER_BOUNTY: int = 64     # hard cap to bound evaluation cost
 MAX_SUBMISSIONS_PER_SOLVER: int = 3      # per bounty, anti-spam
 WINNER_SHARE_BPS: int = 8500             # 85.00% of escrow to the winner
 RUNNER_UP_SHARE_BPS: int = 1000          # 10.00% to the runner-up (if any)
 PROTOCOL_RESERVE_BPS: int = 500          # 5.00% retained for the creator refund
 BPS_DENOMINATOR: int = 10000
+
+# --- Submission window (anti "close immediately" knobs) ---------------------
+MIN_SUBMISSION_WINDOW_SECS: int = 3600        # 1 hour floor
+MAX_SUBMISSION_WINDOW_SECS: int = 30 * 86400  # 30 days ceiling
 
 # --- Acceptance thresholds --------------------------------------------------
 # A submission can win only if its composite score reaches WIN_THRESHOLD and
@@ -115,7 +137,7 @@ ERR_LLM: str = "LLM_ERROR"         # model output could not be used
 @allow_storage
 @dataclass
 class Bounty:
-    """A funded problem statement held in native-GEN escrow."""
+    """A funded problem statement held in USDC escrow on Base Sepolia."""
 
     id: u32
     creator: Address
@@ -129,11 +151,14 @@ class Bounty:
     true_problem_text: str
     category: str
     tags_csv: str                 # comma-separated, validated at write time
-    reward_escrow: u256           # remaining escrowed GEN for this bounty
+    reward_escrow: u256           # remaining escrowed USDC (base units) for this bounty
     initial_escrow: u256          # funding at creation (for UI/history)
     status: u8
     created_at_note: str          # creator-supplied ISO date string (metadata)
     deadline_note: str            # creator-supplied ISO date string (metadata)
+    submission_window_secs: u256   # duration granted once funding is confirmed
+    opened_at: u256                # unix ts: when funding was confirmed (OPEN)
+    submission_deadline: u256      # unix ts: close_submissions cannot fire before this
     submission_ids: DynArray[u32]
     winner_submission_id: u32     # 0 == none
     runner_up_submission_id: u32  # 0 == none
@@ -218,45 +243,29 @@ class AuditEntry:
 
 
 # ============================================================================
-# SECTION 2b — Native value transfer (EVM "send", not a GenVM contract call)
+# SECTION 2b — Value custody model (USDC on Base Sepolia, not native GEN)
 # ============================================================================
-# `gl.get_contract_at(addr).emit_transfer(...)` (the pattern shown in
-# genvm's own docs/examples, and confusingly what `@gl.contract_interface`
-# — note: NOT `@gl.evm.contract_interface` — is aliased to in this pinned
-# runner) routes through GenVM's internal PostMessage mechanism, a CALL
-# convention meant for reaching other GenVM Intelligent Contracts, which
-# can optionally catch it via `__receive__`. A plain wallet (EOA) has no
-# deployed contract code to catch it, so that path fails against every
-# real user wallet ("Contract ... not found") while still decrementing
-# the sender's own GenVM-tracked balance — the GEN leaves the sender and
-# is not recoverable.
+# This contract does NOT hold or move funds directly. GenVM's EVM interop
+# reaches contracts on GenLayer's own chain, not an arbitrary external
+# chain — so a USDC balance on Base Sepolia cannot be moved by a GenVM
+# `EthSend` no matter how it's invoked.
 #
-# The correct primitive for moving native GEN to ANY address (EOA or
-# contract) is `EthSend`, reached only through `@gl.evm.contract_interface`
-# (genlayer/py/evm — the actual EVM-bridge decorator; see
-# genlayer/gl/_internal/eth.py: evm_contract_interface). Declaring an
-# interface with empty View/Write and calling `.emit_transfer(value=...)`
-# on an instance issues a genuine EthSend, which is what actually updates
-# the recipient's balance on GenLayer Chain (the EVM-compatible L2).
-@gl.evm.contract_interface
-class _PayableRecipient:
-    class View:
-        pass
-
-    class Write:
-        pass
-
-
-def _send_gen(to_address: Address, amount: int) -> None:
-    """Send native GEN to any address via a real EthSend, not a GenVM call.
-
-    This is the single emission choke point — every payout in the
-    contract funnels through here, so the value-transfer mechanism can be
-    audited and changed in exactly one place.
-    """
-    if amount <= 0:
-        raise gl.vm.UserError(f"{ERR_EXPECTED}: transfer amount must be positive")
-    _PayableRecipient(to_address).emit_transfer(value=u256(amount))
+# Custody is split instead:
+#   - Real USDC lives in `ReverseSpecEscrow.sol` on Base Sepolia. Creators
+#     fund a bounty there (`fund(bounty_id, amount)`); winners/creators
+#     claim there (`claim(bounty_id)`).
+#   - This contract is the sole source of truth for JUDGING: it decides
+#     who gets what, in USDC base units, and exposes that decision via
+#     `get_base_payouts`. It never touches a private key or a transfer.
+#   - A single trusted relayer address bridges the two directions:
+#     `record_funding` (Base deposit -> this contract, confirms escrow)
+#     and `mark_settled` (this contract's payout instruction -> Base
+#     `settle()` call, confirms it was relayed). Both are idempotent on
+#     the Base transaction hash so a retried relay can never double-count.
+#   - `_credit` below still exists and still updates `reward_history` /
+#     `claimable` / `total_open_escrow` / `total_unclaimed` — that
+#     bookkeeping is what `get_base_payouts` reads from. It is an
+#     internal ledger only; no value moves when it runs.
 
 
 # ============================================================================
@@ -270,30 +279,39 @@ class ReverseSpecBounties(gl.Contract):
     Public surface overview
     -----------------------
     Writes (state-changing, wallet-signed):
-        create_bounty        payable — fund and open a bounty
+        create_bounty        create a PENDING_FUNDING bounty shell (no
+                             value attached — funding happens in USDC on
+                             the Base Sepolia escrow)
+        record_funding       relayer-only — confirms a Base Sepolia USDC
+                             deposit and opens the bounty
         cancel_bounty        creator, only while zero live submissions
         close_submissions    creator, or any solver with a live
-                             submission (abandonment recovery) —
+                             submission (abandonment recovery), and only
+                             once the submission deadline has passed —
                              move OPEN -> EVALUATING
         submit_solution      solver — register rationale + evidence URL
         withdraw_submission  solver — before evaluation
         evaluate_submission  anyone — runs the consensus LLM evaluation
-        finalize_bounty      creator or anyone once all evaluated — pays out
+        finalize_bounty      creator or anyone once all evaluated —
+                             computes the payout instruction
         reclaim_escrow       creator — after UNRESOLVED outcome
-        claim_rewards        recipient — pull-pattern native transfer
+        mark_settled         relayer-only — confirms a Base Sepolia
+                             settle() call for a bounty's payout
 
     Views (free reads for the indexer and UI):
         get_bounty, get_bounty_page, get_submission, get_bounty_submissions,
         get_evaluation, get_claimable, get_solver_stats, get_leaderboard,
         get_platform_stats, get_reward_history, get_audit_page,
-        check_escrow_invariant, get_config
+        check_escrow_invariant, get_config, get_base_payouts
     """
 
     # ---- persistent state ---------------------------------------------------
     owner: Address
+    relayer: Address
     bounty_seq: u32
     submission_seq: u32
     audit_seq: u32
+    applied_base_tx: TreeMap[str, bool]
 
     bounties: TreeMap[u32, Bounty]
     submissions: TreeMap[u32, Submission]
@@ -315,13 +333,17 @@ class ReverseSpecBounties(gl.Contract):
     # Construction
     # ------------------------------------------------------------------------
     def __init__(self):
-        """Deploys the protocol. The deployer becomes `owner`.
+        """Deploys the protocol. The deployer becomes `owner` and `relayer`.
 
         Ownership is intentionally minimal: the owner has NO power over
-        escrow, verdicts, or payouts — those belong to consensus. Owner is
-        recorded purely for provenance/auditing.
+        verdicts or payout decisions — those belong to consensus. Owner
+        may only rotate the trusted relayer identity. The relayer is the
+        single address permitted to confirm Base Sepolia funding/settle
+        events (`record_funding`/`mark_settled`); it never touches escrow
+        state, verdicts, or ranking.
         """
         self.owner = gl.message.sender_address
+        self.relayer = gl.message.sender_address
         self.bounty_seq = u32(0)
         self.submission_seq = u32(0)
         self.audit_seq = u32(0)
@@ -352,6 +374,16 @@ class ReverseSpecBounties(gl.Contract):
         """Business-rule guard. Reverts with an EXPECTED-classified error."""
         if not condition:
             self._fail(ERR_EXPECTED, message)
+
+    def _only_relayer(self) -> None:
+        """Restrict a write to the trusted Base Sepolia relayer address."""
+        self._require(gl.message.sender_address == self.relayer,
+                      "only the relayer may call this")
+
+    def _only_owner(self) -> None:
+        """Restrict a write to the deploying owner address."""
+        self._require(gl.message.sender_address == self.owner,
+                      "only the owner may call this")
 
     def _require_text(self, value: str, field: str, max_len: int,
                       min_len: int = 1) -> str:
@@ -736,19 +768,21 @@ Respond with ONLY a JSON object, no markdown, in exactly this shape:
             if not isinstance(leader_result, gl.vm.Return):
                 return False
             try:
-                leader_verdict = contract._normalize_verdict(
-                    dict(leader_result.calldata))
+                leader_calldata = dict(leader_result.calldata)
+                leader_verdict = contract._normalize_verdict(leader_calldata)
             except (TypeError, KeyError):
                 return False
             if leader_verdict is None:
                 return False
+            leader_evidence_ok = bool(leader_calldata.get(
+                "evidence_fetch_ok", False))
             leader_composite = contract._composite(
                 leader_verdict["spec_compliance"],
                 leader_verdict["problem_depth"],
                 leader_verdict["superiority"],
                 leader_verdict["evidence_quality"])
 
-            # --- 2. semantic validation: re-derive and compare tolerantly.
+            # --- 2. semantic validation: re-derive and compare strictly.
             try:
                 mine = derive()
             except Exception:  # noqa: BLE001
@@ -762,13 +796,14 @@ Respond with ONLY a JSON object, no markdown, in exactly this shape:
             tier_gap = abs(int(mine["tier"]) - int(leader_verdict["tier"]))
             score_gap = abs(contract._band(my_composite)
                             - contract._band(leader_composite))
-            if tier_gap <= TIER_TOLERANCE and score_gap <= SCORE_TOLERANCE:
-                return True
-            # Borderline disagreement across the decision boundary matters
-            # most; elsewhere, wide-but-same-side gaps are still acceptable.
-            same_side = ((my_composite >= WIN_THRESHOLD)
-                         == (leader_composite >= WIN_THRESHOLD))
-            return same_side and tier_gap <= TIER_TOLERANCE + 1
+            # Evidence availability must match exactly: a payout-driving
+            # verdict can't be "accepted" when one side fetched the
+            # artifact and the other didn't — that's a materially
+            # different basis for the score, not tolerable variance.
+            evidence_agrees = (bool(mine["evidence_fetch_ok"])
+                              == leader_evidence_ok)
+            return (evidence_agrees and tier_gap <= TIER_TOLERANCE
+                   and score_gap <= SCORE_TOLERANCE)
 
         result = gl.vm.run_nondet(derive, validator_fn)
         # Depending on runtime, run_nondet returns either the plain value or
@@ -782,15 +817,18 @@ Respond with ONLY a JSON object, no markdown, in exactly this shape:
     # SECTION 6 — Public writes: bounty lifecycle
     # ========================================================================
 
-    @gl.public.write.payable
+    @gl.public.write
     def create_bounty(self, title: str, spec_text: str,
                       true_problem_text: str, category: str, tags_csv: str,
-                      created_at_note: str, deadline_note: str) -> u32:
-        """Fund and open a bounty. The attached native GEN becomes escrow.
+                      created_at_note: str, deadline_note: str,
+                      submission_window_secs: u256) -> u32:
+        """Create a bounty shell awaiting USDC funding on Base Sepolia.
 
-        This is the entry point of the value-transfer path: value moves
-        from the creator's wallet into contract-held escrow atomically with
-        bounty creation.
+        No value is attached here — GenLayer cannot custody an asset that
+        lives on another chain. The creator funds the bounty by calling
+        `fund(bounty_id, amount)` on the Base Sepolia escrow contract; the
+        relayer then confirms that deposit via `record_funding`, which is
+        what actually opens the bounty to submissions.
 
         Args:
             title: short bounty headline.
@@ -800,15 +838,20 @@ Respond with ONLY a JSON object, no markdown, in exactly this shape:
             category: short category label, e.g. "Protocol", "DeFi", "UX".
             tags_csv: up to MAX_TAG_COUNT comma-separated tags.
             created_at_note / deadline_note: ISO-8601 strings kept as
-                display metadata (lifecycle is state-machine driven, not
-                clock driven, so consensus never depends on wall time).
+                display metadata.
+            submission_window_secs: how long, once funded and OPEN, the
+                bounty stays open to new submissions before anyone can
+                call `close_submissions`. Bounded to prevent both a
+                same-block close and an unbounded-forever bounty.
 
         Returns:
             The new bounty id.
         """
-        escrow = int(gl.message.value)
-        self._require(escrow >= MIN_BOUNTY_ESCROW,
-                      f"escrow below minimum ({MIN_BOUNTY_ESCROW} base units)")
+        window = int(submission_window_secs)
+        self._require(
+            MIN_SUBMISSION_WINDOW_SECS <= window <= MAX_SUBMISSION_WINDOW_SECS,
+            f"submission_window_secs must be between "
+            f"{MIN_SUBMISSION_WINDOW_SECS} and {MAX_SUBMISSION_WINDOW_SECS}")
         title_n = self._require_text(title, "title", MAX_TITLE_LEN, 8)
         spec_n = self._require_text(spec_text, "spec_text", MAX_SPEC_LEN, 40)
         true_problem_n = ""
@@ -837,11 +880,14 @@ Respond with ONLY a JSON object, no markdown, in exactly this shape:
             true_problem_text=true_problem_n,
             category=category_n,
             tags_csv=tags_n,
-            reward_escrow=u256(escrow),
-            initial_escrow=u256(escrow),
-            status=u8(BOUNTY_OPEN),
+            reward_escrow=u256(0),
+            initial_escrow=u256(0),
+            status=u8(BOUNTY_PENDING_FUNDING),
             created_at_note=created_at_note.strip()[:40],
             deadline_note=deadline_note.strip()[:40],
+            submission_window_secs=u256(window),
+            opened_at=u256(0),
+            submission_deadline=u256(0),
             submission_ids=[],  # coerced into DynArray[u32] by storage encoder
             winner_submission_id=u32(0),
             runner_up_submission_id=u32(0),
@@ -849,24 +895,60 @@ Respond with ONLY a JSON object, no markdown, in exactly this shape:
             resolution_summary="",
         )
         self.bounties[bounty_id] = bounty
-        self.total_open_escrow = u256(int(self.total_open_escrow) + escrow)
         self._audit("CREATE_BOUNTY",
-                    f"id={int(bounty_id)} escrow={escrow} title={title_n[:60]}")
+                    f"id={int(bounty_id)} window={window} title={title_n[:60]}")
         return bounty_id
 
     @gl.public.write
-    def cancel_bounty(self, bounty_id: u32) -> None:
-        """Cancel an OPEN bounty that has no live submissions; refund escrow.
+    def record_funding(self, bounty_id: u32, funder: str, amount: u256,
+                       base_tx_hash: str) -> None:
+        """Relayer-only: confirm a USDC deposit made on the Base Sepolia
+        escrow contract and open the bounty once the minimum is met.
 
-        Refund is credited to the creator's claimable balance (pull
-        pattern) — the second leg of the value-transfer path for the
-        no-takers case.
+        Idempotent on `base_tx_hash` so a retried/duplicated relay can
+        never double-credit a bounty.
+        """
+        self._only_relayer()
+        bounty = self._get_bounty_or_fail(int(bounty_id))
+        tx_key = base_tx_hash.strip().lower()
+        self._require(bool(tx_key), "base_tx_hash is required")
+        if self.applied_base_tx.get(tx_key):
+            return  # idempotent no-op: already applied — checked BEFORE
+                    # the status guard so a retried relay after the bounty
+                    # already opened doesn't get misreported as an error.
+        self._require(int(bounty.status) == BOUNTY_PENDING_FUNDING,
+                      "bounty is not awaiting funding")
+        self.applied_base_tx[tx_key] = True
+        deposited = int(amount)
+        self._require(deposited >= MIN_BOUNTY_ESCROW,
+                      f"deposit below minimum ({MIN_BOUNTY_ESCROW} base units)")
+        now = _now_ts()
+        bounty.reward_escrow = u256(deposited)
+        bounty.initial_escrow = u256(deposited)
+        bounty.opened_at = u256(now)
+        bounty.submission_deadline = u256(now + int(bounty.submission_window_secs))
+        bounty.status = u8(BOUNTY_OPEN)
+        self.total_open_escrow = u256(int(self.total_open_escrow) + deposited)
+        self._audit("RECORD_FUNDING",
+                    f"id={int(bounty_id)} amount={deposited} "
+                    f"funder={funder} base_tx={tx_key}")
+
+    @gl.public.write
+    def cancel_bounty(self, bounty_id: u32) -> None:
+        """Cancel a PENDING_FUNDING or OPEN bounty with no live submissions.
+
+        For an OPEN bounty, the escrowed USDC is credited back to the
+        creator's ledger balance and becomes visible via
+        `get_base_payouts` for the relayer to settle on Base Sepolia. A
+        PENDING_FUNDING bounty has no escrow yet, so cancelling it is a
+        pure no-refund state change.
         """
         bounty = self._get_bounty_or_fail(int(bounty_id))
         self._require(bounty.creator == gl.message.sender_address,
                       "only the creator can cancel")
-        self._require(int(bounty.status) == BOUNTY_OPEN,
-                      "only OPEN bounties can be cancelled")
+        status = int(bounty.status)
+        self._require(status in (BOUNTY_PENDING_FUNDING, BOUNTY_OPEN),
+                      "only PENDING_FUNDING or OPEN bounties can be cancelled")
         live = 0
         for sid in bounty.submission_ids:
             sub = self.submissions.get(sid)
@@ -876,8 +958,9 @@ Respond with ONLY a JSON object, no markdown, in exactly this shape:
                       "cannot cancel: live submissions exist; "
                       "close submissions and evaluate instead")
         refund = int(bounty.reward_escrow)
-        self._credit(int(bounty_id), 0, bounty.creator, refund,
-                     "REFUND_CANCEL")
+        if refund > 0:
+            self._credit(int(bounty_id), 0, bounty.creator, refund,
+                         "REFUND_CANCEL")
         bounty.status = u8(BOUNTY_CANCELLED)
         bounty.resolution_summary = "Cancelled by creator before submissions."
         self._audit("CANCEL_BOUNTY", f"id={int(bounty_id)} refund={refund}")
@@ -894,14 +977,24 @@ Respond with ONLY a JSON object, no markdown, in exactly this shape:
         creator who stops responding after real work has been submitted
         would permanently strand both the escrow and every solver's unpaid
         submission, with no path forward. Since the protocol has no
-        wall-clock dependence (deliberately, for consensus determinism), a
         stakeholder-triggered escape hatch — not a public/anyone-can-call
         one, to avoid a stranger cutting off submissions early — is the
         safe way to unblock this without opening a griefing vector.
+
+        This is also gated on `submission_deadline` having passed, for
+        BOTH the creator and the abandonment-recovery solver path: without
+        that, a solver (or an impatient creator) could close the window
+        the instant a single submission lands, shutting out every other
+        prospective solver before they had a fair chance to compete. The
+        deadline is fixed at funding time (`record_funding`), so no caller
+        — including the one triggering the close — controls it.
         """
         bounty = self._get_bounty_or_fail(int(bounty_id))
         self._require(int(bounty.status) == BOUNTY_OPEN,
                       "bounty is not OPEN")
+        now = _now_ts()
+        self._require(now >= int(bounty.submission_deadline),
+                      "submission window has not elapsed yet")
         caller = gl.message.sender_address
         live = 0
         caller_has_submission = False
@@ -1083,25 +1176,31 @@ Respond with ONLY a JSON object, no markdown, in exactly this shape:
                           f"submission {sid} not evaluated yet")
 
         # Deterministic ranking: composite desc, then tier desc, then the
-        # earlier submission wins ties (submission id asc).
+        # earlier submission wins ties (submission id asc). Every live
+        # submission is ranked and stored for transparency, but only ones
+        # with a consensus-confirmed fetched evidence artifact are
+        # eligible to actually win or place runner-up — an unverifiable
+        # claim cannot drive a real payout, no matter how it scored.
         ranked = []
         for sid in live_ids:
             ev = self.evaluations.get(u32(sid))
             if ev is None:
                 continue
-            ranked.append((int(ev.composite), int(ev.tier), -sid, sid))
+            ranked.append((int(ev.composite), int(ev.tier),
+                           bool(ev.evidence_fetch_ok), -sid, sid))
         ranked.sort(reverse=True)
 
         winner_id = 0
         runner_up_id = 0
-        for composite, tier, _neg, sid in ranked:
+        for composite, tier, evidence_ok, _neg, sid in ranked:
             if winner_id == 0:
-                if composite >= WIN_THRESHOLD and tier >= TIER_PARTIAL_DEPTH:
+                if (composite >= WIN_THRESHOLD and tier >= TIER_PARTIAL_DEPTH
+                        and evidence_ok):
                     winner_id = sid
                 continue
             if runner_up_id == 0:
                 if (composite >= RUNNER_UP_THRESHOLD
-                        and tier >= TIER_PARTIAL_DEPTH):
+                        and tier >= TIER_PARTIAL_DEPTH and evidence_ok):
                     runner_up_id = sid
                 break
 
@@ -1192,37 +1291,46 @@ Respond with ONLY a JSON object, no markdown, in exactly this shape:
                     f"bounty={int(bounty_id)} amount={amount}")
 
     @gl.public.write
-    def claim_rewards(self) -> u256:
-        """Transfer the caller's full claimable balance to their wallet.
+    def mark_settled(self, bounty_id: u32, base_tx_hash: str) -> None:
+        """Relayer-only: confirm that a bounty's payout instruction was
+        successfully submitted as a `settle()` call on the Base Sepolia
+        escrow contract.
 
-        The terminal leg of the value-transfer path: native GEN leaves the
-        contract and lands in the recipient's account.
+        This is the terminal leg of the split-custody design: GenLayer
+        never moves value itself. Once marked, `get_base_payouts` stops
+        offering this bounty's (now-settled) reward records, and every
+        unsettled ledger entry for it is closed out. Idempotent on
+        `base_tx_hash`.
         """
-        recipient = gl.message.sender_address
-        current = self.claimable.get(recipient)
-        amount = int(current) if current is not None else 0
-        self._require(amount > 0, "nothing claimable")
-        # Effects before interaction (checks-effects-interactions).
-        self.claimable[recipient] = u256(0)
-        self.total_unclaimed = u256(int(self.total_unclaimed) - amount)
+        self._only_relayer()
+        bounty = self._get_bounty_or_fail(int(bounty_id))
+        tx_key = base_tx_hash.strip().lower()
+        self._require(bool(tx_key), "base_tx_hash is required")
+        if self.applied_base_tx.get(tx_key):
+            return  # idempotent no-op: already applied
+        self.applied_base_tx[tx_key] = True
+        settled_amount = 0
         for record in self.reward_history:
-            if record.recipient == recipient and not record.settled:
+            if int(record.bounty_id) == int(bounty_id) and not record.settled:
                 record.settled = True
-        # Native transfer out of contract balance — a real EthSend, so it
-        # correctly credits a plain wallet, not just a GenVM contract.
-        # Native transfer out of contract balance — a real EthSend, so it
-        # correctly credits a plain wallet, not just a GenVM contract.
-        _send_gen(recipient, amount)
-        self.reward_history.append(RewardRecord(
-            bounty_id=u32(0),
-            submission_id=u32(0),
-            recipient=recipient,
-            amount=u256(amount),
-            kind="CLAIM",
-            settled=True,
-        ))
-        self._audit("CLAIM_REWARDS", f"amount={amount}")
-        return u256(amount)
+                settled_amount += int(record.amount)
+                current = self.claimable.get(record.recipient)
+                base = int(current) if current is not None else 0
+                self.claimable[record.recipient] = u256(max(0, base - int(record.amount)))
+        self._require(settled_amount > 0,
+                      "no unsettled reward records for this bounty")
+        self.total_unclaimed = u256(
+            max(0, int(self.total_unclaimed) - settled_amount))
+        self._audit("MARK_SETTLED",
+                    f"bounty={int(bounty_id)} amount={settled_amount} "
+                    f"base_tx={tx_key}")
+
+    @gl.public.write
+    def set_relayer(self, new_relayer: str) -> None:
+        """Owner-only: rotate the trusted Base Sepolia relayer identity."""
+        self._only_owner()
+        self.relayer = Address(new_relayer)
+        self._audit("SET_RELAYER", f"relayer={new_relayer}")
 
     # ========================================================================
     # SECTION 10 — Views (free reads for indexer + UI)
@@ -1251,6 +1359,9 @@ Respond with ONLY a JSON object, no markdown, in exactly this shape:
             "status": BOUNTY_STATUS_NAMES.get(int(bounty.status), "?"),
             "created_at_note": bounty.created_at_note,
             "deadline_note": bounty.deadline_note,
+            "submission_window_secs": int(bounty.submission_window_secs),
+            "opened_at": int(bounty.opened_at),
+            "submission_deadline": int(bounty.submission_deadline),
             "submission_count": len(bounty.submission_ids),
             "evaluated_count": int(bounty.evaluated_count),
             "winner_submission_id": int(bounty.winner_submission_id),
@@ -1415,6 +1526,29 @@ Respond with ONLY a JSON object, no markdown, in exactly this shape:
         return out
 
     @gl.public.view
+    def get_base_payouts(self, bounty_id: u32) -> list:
+        """Consensus-derived USDC allocations for the Base Sepolia relayer.
+
+        Aggregates every unsettled `reward_history` entry for this bounty
+        by recipient. Empty once `mark_settled` has confirmed the
+        corresponding `settle()` call on Base Sepolia — the relayer
+        cannot pay a bounty out twice because there is nothing left here
+        to read after the first successful relay.
+        """
+        totals: dict = {}
+        order: list = []
+        for record in self.reward_history:
+            if int(record.bounty_id) != int(bounty_id) or record.settled:
+                continue
+            key = record.recipient.as_hex
+            if key not in totals:
+                totals[key] = 0
+                order.append(key)
+            totals[key] += int(record.amount)
+        return [{"recipient": key, "amount": str(totals[key])}
+                for key in order if totals[key] > 0]
+
+    @gl.public.view
     def get_platform_stats(self) -> dict:
         """Headline numbers for the explorer/landing stats strip."""
         open_count = 0
@@ -1467,22 +1601,35 @@ Respond with ONLY a JSON object, no markdown, in exactly this shape:
 
         Any monitoring system (the backend indexer calls this every cycle)
         can alarm if `healthy` ever turns false.
+        Note: this contract never custodies USDC (it lives in the Base
+        Sepolia escrow), so this checks internal ledger self-consistency
+        rather than a real token balance — the sum of every live bounty's
+        `reward_escrow` must equal the tracked `total_open_escrow`.
         """
-        balance = int(self.balance)
-        obligations = int(self.total_open_escrow) + int(self.total_unclaimed)
+        summed_open = 0
+        idx = 1
+        while idx <= int(self.bounty_seq):
+            bounty = self.bounties.get(u32(idx))
+            if bounty is not None:
+                summed_open += int(bounty.reward_escrow)
+            idx += 1
+        tracked_open = int(self.total_open_escrow)
         return {
-            "contract_balance": str(balance),
-            "open_escrow": str(int(self.total_open_escrow)),
+            "tracked_open_escrow": str(tracked_open),
+            "summed_bounty_escrow": str(summed_open),
             "unclaimed_rewards": str(int(self.total_unclaimed)),
-            "obligations": str(obligations),
-            "healthy": balance >= obligations,
+            "healthy": tracked_open == summed_open,
         }
 
     @gl.public.view
     def get_config(self) -> dict:
         """Protocol constants, exposed for UI display and client validation."""
         return {
+            "funding_currency": "USDC",
+            "usdc_decimals": 6,
             "min_bounty_escrow": str(MIN_BOUNTY_ESCROW),
+            "min_submission_window_secs": MIN_SUBMISSION_WINDOW_SECS,
+            "max_submission_window_secs": MAX_SUBMISSION_WINDOW_SECS,
             "max_submissions_per_bounty": MAX_SUBMISSIONS_PER_BOUNTY,
             "max_submissions_per_solver": MAX_SUBMISSIONS_PER_SOLVER,
             "winner_share_bps": WINNER_SHARE_BPS,
@@ -1494,4 +1641,5 @@ Respond with ONLY a JSON object, no markdown, in exactly this shape:
             "tier_tolerance": TIER_TOLERANCE,
             "tiers": [TIER_NAMES[t] for t in sorted(TIER_NAMES)],
             "owner": self.owner.as_hex,
+            "relayer": self.relayer.as_hex,
         }

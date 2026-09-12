@@ -10,7 +10,7 @@ import {
 } from "@/components/ui";
 import { api, type Profile, type Submission } from "@/lib/api";
 import { readContract } from "@/lib/chain";
-import { formatGen, shortAddress } from "@/lib/format";
+import { formatUsdc, shortAddress } from "@/lib/format";
 import { useWallet } from "@/lib/wallet";
 
 interface SolverStats {
@@ -139,7 +139,7 @@ export default function ProfilePage() {
         <StatCard label="Submissions"
           value={stats ? stats.submissions_total : "—"} />
         <StatCard label="Earned" accent="text-secondary"
-          value={stats ? `${formatGen(stats.earned_total)} GEN` : "—"} />
+          value={stats ? `${formatUsdc(stats.earned_total)} USDC` : "—"} />
       </div>
 
       {/* Proof of innovation */}

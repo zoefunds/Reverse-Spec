@@ -6,7 +6,7 @@ import Link from "next/link";
 
 import { Card, DiffPane, ScoreRing, StatusTag, Tag } from "@/components/ui";
 import type { Bounty, Evaluation } from "@/lib/api";
-import { formatGen, TIER_LABEL } from "@/lib/format";
+import { formatUsdc, formatCountdown, TIER_LABEL } from "@/lib/format";
 
 export function BountyCard({ bounty }: { bounty: Bounty }) {
   return (
@@ -26,11 +26,16 @@ export function BountyCard({ bounty }: { bounty: Bounty }) {
             </div>
             <div className="shrink-0 text-right">
               <div className="font-mono text-h3 text-tertiary">
-                {formatGen(bounty.reward_escrow)} GEN
+                {formatUsdc(bounty.reward_escrow)} USDC
               </div>
               <div className="font-mono text-tag text-ink-faint">
                 #{bounty.chain_bounty_id} · {bounty.submission_count} submissions
               </div>
+              {bounty.status === "OPEN" && bounty.submission_deadline > 0 && (
+                <div className="font-mono text-tag text-ink-faint">
+                  {formatCountdown(bounty.submission_deadline)}
+                </div>
+              )}
             </div>
           </div>
           <DiffPane

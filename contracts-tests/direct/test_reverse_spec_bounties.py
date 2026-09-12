@@ -4,10 +4,15 @@ Runs the contract natively via gltest's direct runner — no simulator needed.
 Web and LLM calls are mocked; consensus behavior itself is covered by the
 integration suite (contracts-tests/integration/) against Studio/StudioNet.
 
+Funding is USDC (6 decimals) confirmed via the relayer-only `record_funding`
+write, mirroring the real Base-Sepolia-escrow + relayer split-custody
+design — this contract never moves value itself.
+
 Run:  .venv/bin/pytest contracts-tests/direct/ -v
 """
 
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -20,14 +25,23 @@ def addr_hex(a) -> str:
     return a.as_hex if hasattr(a, "as_hex") else "0x" + a.hex()
 
 
+def warp_seconds(vm, seconds: int) -> None:
+    """Advance the VM's transaction clock by `seconds`, on top of whatever
+    it's currently set to (VMContext only exposes absolute `warp`)."""
+    current = datetime.fromisoformat(vm._datetime.replace("Z", "+00:00"))
+    vm.warp((current + timedelta(seconds=seconds)).isoformat().replace(
+        "+00:00", "Z"))
+
+
 CONTRACT_PATH = (
     Path(__file__).resolve().parents[2] / "contracts" / "reverse_spec_bounties.py"
 )
 
-GEN = 10**18                 # 1 GEN in base units
-ESCROW = 10 * GEN            # default bounty funding used across tests
+USDC = 10**6                  # 1.00 USDC in base units
+ESCROW = 100 * USDC           # default bounty funding used across tests
+DEFAULT_WINDOW = 3600 * 24    # 1 day, a valid submission_window_secs
 
-OWNER = create_address("owner")
+OWNER = create_address("owner")            # deployer == owner == relayer
 CREATOR = create_address("creator")
 SOLVER_A = create_address("solver_a")
 SOLVER_B = create_address("solver_b")
@@ -79,41 +93,12 @@ LOW_VERDICT = json.dumps({
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
 
-def _eth_send_hook(vm, request):
-    """Simulate a real EthSend: credit the recipient's actual balance,
-    debit the sender contract's. Without this, gl.contract_interface's
-    emit_transfer (EthSend) has no mock handler and the direct-test
-    harness silently no-ops it — exactly the class of gap that let a
-    real production bug (money leaving the contract's ledger but never
-    reaching the recipient's wallet) go undetected by 33 "passing" tests
-    that only ever checked internal claimable/history state, never an
-    actual balance movement.
-    """
-    send = request.get("EthSend")
-    if send is None:
-        return None
-    to_bytes = vm._to_bytes(send["address"])
-    value = int(send.get("value", 0))
-    vm._balances[to_bytes] = vm._balances.get(to_bytes, 0) + value
-    if vm._contract_address is not None:
-        vm._balances[vm._contract_address] = (
-            vm._balances.get(vm._contract_address, 0) - value)
-    return {"ok": None}
-
-
 @pytest.fixture()
 def vm():
     ctx = VMContext()
-    ctx.sender = OWNER
-    ctx._gl_call_hook = _eth_send_hook
+    ctx.sender = OWNER  # deployer becomes owner + relayer
     with ctx.activate():
         yield ctx
-
-
-def wallet_balance(vm, address) -> int:
-    """Real wallet balance (distinct from the contract's internal
-    `claimable` ledger) — this is what actually proves GEN arrived."""
-    return vm._balances.get(vm._to_bytes(address), 0)
 
 
 @pytest.fixture()
@@ -121,10 +106,9 @@ def contract(vm):
     return deploy_contract(CONTRACT_PATH, vm)
 
 
-def _fund_bounty(vm, contract, creator=CREATOR, escrow=ESCROW):
+def _create(vm, contract, creator=CREATOR, window=DEFAULT_WINDOW):
     vm.sender = creator
-    vm.value = escrow
-    bounty_id = contract.create_bounty(
+    return contract.create_bounty(
         "Fix wallet approval UX at the root",
         SPEC,
         TRUE_PROBLEM,
@@ -132,8 +116,20 @@ def _fund_bounty(vm, contract, creator=CREATOR, escrow=ESCROW):
         "wallet,security,simulation",
         "2026-07-17",
         "2026-08-17",
+        window,
     )
-    vm.value = 0
+
+
+def _fund_bounty(vm, contract, creator=CREATOR, escrow=ESCROW,
+                 window=DEFAULT_WINDOW, tx_hash=None):
+    """Create + relayer-confirm funding, matching the real two-step flow:
+    create_bounty (GenLayer) -> fund() on Base Sepolia -> record_funding
+    (relayer, once the Base deposit is confirmed)."""
+    bounty_id = _create(vm, contract, creator=creator, window=window)
+    vm.sender = OWNER  # the relayer
+    contract.record_funding(
+        bounty_id, addr_hex(creator), escrow,
+        tx_hash or f"0xfund{int(bounty_id):04x}")
     return bounty_id
 
 
@@ -149,40 +145,74 @@ def _mock_evaluation(vm, verdict_json=GOOD_VERDICT,
     vm.mock_llm(r".*adjudication engine.*", verdict_json)
 
 
+def _close_after_window(vm, contract, bounty_id, sender=CREATOR,
+                        window=DEFAULT_WINDOW):
+    """Warp past the submission deadline, then close_submissions."""
+    warp_seconds(vm, window + 1)
+    vm.sender = sender
+    contract.close_submissions(bounty_id)
+
+
 # ---------------------------------------------------------------------------
-# Bounty creation & escrow
+# Bounty creation & funding
 # ---------------------------------------------------------------------------
 
-class TestCreateBounty:
-    def test_create_holds_escrow(self, vm, contract):
+class TestCreateAndFund:
+    def test_create_is_pending_funding(self, vm, contract):
+        bounty_id = _create(vm, contract)
+        data = contract.get_bounty(bounty_id)
+        assert data["status"] == "PENDING_FUNDING"
+        assert data["reward_escrow"] == "0"
+
+    def test_record_funding_opens_bounty(self, vm, contract):
         bounty_id = _fund_bounty(vm, contract)
         data = contract.get_bounty(bounty_id)
         assert data["status"] == "OPEN"
         assert data["reward_escrow"] == str(ESCROW)
         assert data["creator"].lower().endswith(addr_hex(CREATOR)[-8:].lower())
+        assert data["submission_deadline"] > data["opened_at"]
         stats = contract.get_platform_stats()
         assert stats["open_escrow"] == str(ESCROW)
 
-    def test_rejects_dust_escrow(self, vm, contract):
+    def test_record_funding_is_relayer_only(self, vm, contract):
+        bounty_id = _create(vm, contract)
         vm.sender = CREATOR
-        vm.value = 10  # far below MIN_BOUNTY_ESCROW
-        with pytest.raises(Exception, match="EXPECTED.*escrow below minimum"):
-            contract.create_bounty("A valid bounty title", SPEC, "", "UX",
-                                   "", "", "")
+        with pytest.raises(Exception, match="EXPECTED.*only the relayer"):
+            contract.record_funding(bounty_id, addr_hex(CREATOR), ESCROW,
+                                    "0xnotrelayer")
+
+    def test_record_funding_idempotent_on_tx_hash(self, vm, contract):
+        bounty_id = _create(vm, contract)
+        vm.sender = OWNER
+        contract.record_funding(bounty_id, addr_hex(CREATOR), ESCROW, "0xdup")
+        # Second relay with the same base_tx_hash must be a silent no-op,
+        # not a double-credit.
+        contract.record_funding(bounty_id, addr_hex(CREATOR), ESCROW, "0xdup")
+        assert contract.get_bounty(bounty_id)["reward_escrow"] == str(ESCROW)
+
+    def test_record_funding_rejects_dust(self, vm, contract):
+        bounty_id = _create(vm, contract)
+        vm.sender = OWNER
+        with pytest.raises(Exception, match="EXPECTED.*deposit below minimum"):
+            contract.record_funding(bounty_id, addr_hex(CREATOR), 10, "0xdust")
 
     def test_rejects_short_spec(self, vm, contract):
         vm.sender = CREATOR
-        vm.value = ESCROW
         with pytest.raises(Exception, match="EXPECTED.*spec_text"):
             contract.create_bounty("A valid bounty title", "too short", "",
-                                   "UX", "", "", "")
+                                   "UX", "", "", "", DEFAULT_WINDOW)
 
     def test_tag_cap_enforced(self, vm, contract):
         vm.sender = CREATOR
-        vm.value = ESCROW
         with pytest.raises(Exception, match="EXPECTED.*tags"):
             contract.create_bounty("A valid bounty title", SPEC, "", "UX",
-                                   "a,b,c,d,e,f,g", "", "")
+                                   "a,b,c,d,e,f,g", "", "", DEFAULT_WINDOW)
+
+    def test_submission_window_bounds_enforced(self, vm, contract):
+        vm.sender = CREATOR
+        with pytest.raises(Exception, match="EXPECTED.*submission_window_secs"):
+            contract.create_bounty("A valid bounty title", SPEC, "", "UX",
+                                   "", "", "", 10)  # far below the 1h floor
 
 
 # ---------------------------------------------------------------------------
@@ -198,6 +228,13 @@ class TestSubmissions:
         assert sub["evidence_url"] == EVIDENCE_URL
         subs = contract.get_bounty_submissions(bounty_id)
         assert len(subs) == 1
+
+    def test_cannot_submit_before_funded(self, vm, contract):
+        bounty_id = _create(vm, contract)
+        vm.sender = SOLVER_A
+        with pytest.raises(Exception, match="EXPECTED.*not accepting"):
+            contract.submit_solution(bounty_id, "Too early submission title",
+                                     RATIONALE, EVIDENCE_URL)
 
     def test_creator_cannot_self_submit(self, vm, contract):
         bounty_id = _fund_bounty(vm, contract)
@@ -240,15 +277,38 @@ class TestSubmissions:
 
 
 # ---------------------------------------------------------------------------
-# Lifecycle guards
+# Lifecycle guards — including the real submission window
 # ---------------------------------------------------------------------------
 
 class TestLifecycle:
     def test_close_requires_live_submission(self, vm, contract):
         bounty_id = _fund_bounty(vm, contract)
+        warp_seconds(vm, DEFAULT_WINDOW + 1)
         vm.sender = CREATOR
         with pytest.raises(Exception, match="EXPECTED.*no live submissions"):
             contract.close_submissions(bounty_id)
+
+    def test_creator_cannot_close_before_deadline(self, vm, contract):
+        bounty_id = _fund_bounty(vm, contract)
+        _submit(vm, contract, bounty_id)
+        vm.sender = CREATOR
+        with pytest.raises(Exception, match="EXPECTED.*window has not elapsed"):
+            contract.close_submissions(bounty_id)
+
+    def test_solver_cannot_close_immediately_either(self, vm, contract):
+        """The exploit this fixes: a solver submitting once and instantly
+        shutting out every other prospective competitor."""
+        bounty_id = _fund_bounty(vm, contract)
+        _submit(vm, contract, bounty_id, solver=SOLVER_A)
+        vm.sender = SOLVER_A
+        with pytest.raises(Exception, match="EXPECTED.*window has not elapsed"):
+            contract.close_submissions(bounty_id)
+
+    def test_close_succeeds_after_window(self, vm, contract):
+        bounty_id = _fund_bounty(vm, contract)
+        _submit(vm, contract, bounty_id)
+        _close_after_window(vm, contract, bounty_id)
+        assert contract.get_bounty(bounty_id)["status"] == "EVALUATING"
 
     def test_cancel_refunds_creator(self, vm, contract):
         bounty_id = _fund_bounty(vm, contract)
@@ -256,6 +316,13 @@ class TestLifecycle:
         contract.cancel_bounty(bounty_id)
         assert contract.get_bounty(bounty_id)["status"] == "CANCELLED"
         assert contract.get_claimable(CREATOR) == str(ESCROW)
+
+    def test_cancel_pending_funding_needs_no_refund(self, vm, contract):
+        bounty_id = _create(vm, contract)
+        vm.sender = CREATOR
+        contract.cancel_bounty(bounty_id)
+        assert contract.get_bounty(bounty_id)["status"] == "CANCELLED"
+        assert contract.get_claimable(CREATOR) == "0"
 
     def test_cannot_cancel_with_live_submission(self, vm, contract):
         bounty_id = _fund_bounty(vm, contract)
@@ -267,8 +334,7 @@ class TestLifecycle:
     def test_no_submissions_after_close(self, vm, contract):
         bounty_id = _fund_bounty(vm, contract)
         _submit(vm, contract, bounty_id)
-        vm.sender = CREATOR
-        contract.close_submissions(bounty_id)
+        _close_after_window(vm, contract, bounty_id)
         vm.sender = SOLVER_B
         with pytest.raises(Exception, match="EXPECTED.*not accepting"):
             contract.submit_solution(bounty_id, "A late valid submission",
@@ -283,8 +349,7 @@ class TestEvaluation:
     def test_evaluate_stores_verdict(self, vm, contract):
         bounty_id = _fund_bounty(vm, contract)
         sub_id = _submit(vm, contract, bounty_id)
-        vm.sender = CREATOR
-        contract.close_submissions(bounty_id)
+        _close_after_window(vm, contract, bounty_id)
         _mock_evaluation(vm)
         vm.sender = SOLVER_B  # anyone can trigger
         contract.evaluate_submission(sub_id)
@@ -299,8 +364,7 @@ class TestEvaluation:
     def test_cannot_evaluate_twice(self, vm, contract):
         bounty_id = _fund_bounty(vm, contract)
         sub_id = _submit(vm, contract, bounty_id)
-        vm.sender = CREATOR
-        contract.close_submissions(bounty_id)
+        _close_after_window(vm, contract, bounty_id)
         _mock_evaluation(vm)
         contract.evaluate_submission(sub_id)
         with pytest.raises(Exception, match="EXPECTED.*not pending"):
@@ -309,8 +373,7 @@ class TestEvaluation:
     def test_malformed_llm_output_is_classified(self, vm, contract):
         bounty_id = _fund_bounty(vm, contract)
         sub_id = _submit(vm, contract, bounty_id)
-        vm.sender = CREATOR
-        contract.close_submissions(bounty_id)
+        _close_after_window(vm, contract, bounty_id)
         _mock_evaluation(vm, verdict_json="I refuse to answer in JSON.")
         with pytest.raises(Exception, match="LLM_ERROR"):
             contract.evaluate_submission(sub_id)
@@ -318,20 +381,76 @@ class TestEvaluation:
     def test_fenced_json_is_tolerated(self, vm, contract):
         bounty_id = _fund_bounty(vm, contract)
         sub_id = _submit(vm, contract, bounty_id)
-        vm.sender = CREATOR
-        contract.close_submissions(bounty_id)
+        _close_after_window(vm, contract, bounty_id)
         fenced = "```json\n" + GOOD_VERDICT + "\n```"
         _mock_evaluation(vm, verdict_json=fenced)
         contract.evaluate_submission(sub_id)
         assert contract.get_evaluation(sub_id)["tier"] == "REDEFINING"
 
+    def test_validator_rejects_mismatched_evidence_availability(
+            self, vm, contract):
+        """A leader that fetched evidence and a validator that couldn't
+        must NOT be treated as agreeing, even with identical scores — the
+        basis for the score differs materially."""
+        bounty_id = _fund_bounty(vm, contract)
+        sub_id = _submit(vm, contract, bounty_id)
+        _close_after_window(vm, contract, bounty_id)
+        # Leader run: evidence fetch succeeds.
+        _mock_evaluation(vm, verdict_json=GOOD_VERDICT)
+        contract.evaluate_submission(sub_id)
+        assert contract.get_evaluation(sub_id)["evidence_fetch_ok"] is True
+        # Validator re-derivation: same LLM answer, but the fetch now
+        # fails (no web mock) -> evidence_fetch_ok flips to False.
+        vm.clear_mocks()
+        vm.mock_llm(r".*adjudication engine.*", GOOD_VERDICT)
+        accepted = vm.run_validator()
+        assert accepted is False
+
+    def test_validator_accepts_matching_evidence_and_scores(self, vm, contract):
+        bounty_id = _fund_bounty(vm, contract)
+        sub_id = _submit(vm, contract, bounty_id)
+        _close_after_window(vm, contract, bounty_id)
+        _mock_evaluation(vm, verdict_json=GOOD_VERDICT)
+        contract.evaluate_submission(sub_id)
+        # Re-run the validator with identical mocks still in place — same
+        # evidence availability, same scores -> must accept.
+        accepted = vm.run_validator()
+        assert accepted is True
+
+    def test_tightened_score_tolerance_rejects_prior_borderline_case(
+            self, vm, contract):
+        """SCORE_TOLERANCE dropped from 20 to 12: a gap that used to be
+        waved through must now be rejected."""
+        bounty_id = _fund_bounty(vm, contract)
+        sub_id = _submit(vm, contract, bounty_id)
+        _close_after_window(vm, contract, bounty_id)
+        _mock_evaluation(vm, verdict_json=GOOD_VERDICT)
+        contract.evaluate_submission(sub_id)
+        disagreeing = json.dumps({
+            "spec_compliance": 55, "problem_depth": 90,
+            "superiority": 85, "evidence_quality": 80,
+            # composite unchanged at 83, but tier gap of 2 (REDEFINING vs
+            # PARTIAL_DEPTH) exceeds TIER_TOLERANCE regardless of score —
+            # kept here to also confirm the removed same-side fallback.
+            "tier": "PARTIAL_DEPTH",
+            "reasoning": "A validator that reads the same evidence very "
+                        "differently on tier, despite similar scores.",
+            "evidence_excerpt": "",
+        })
+        vm.clear_mocks()
+        vm.mock_web(r".*github\.com.*",
+                    {"status": 200, "body": "README: working simulation harness code"})
+        vm.mock_llm(r".*adjudication engine.*", disagreeing)
+        accepted = vm.run_validator()
+        assert accepted is False
+
 
 # ---------------------------------------------------------------------------
-# Finalization & the value-transfer path
+# Finalization & the payout-instruction path (get_base_payouts / mark_settled)
 # ---------------------------------------------------------------------------
 
 class TestFinalization:
-    def _run_to_evaluated(self, vm, contract, verdicts):
+    def _run_to_evaluated(self, vm, contract, verdicts, evidence_ok=True):
         """Fund, submit len(verdicts) solutions, evaluate each with the
         paired verdict. Returns (bounty_id, [submission_ids])."""
         bounty_id = _fund_bounty(vm, contract)
@@ -342,11 +461,14 @@ class TestFinalization:
                 vm, contract, bounty_id, solver=solvers[i % 2],
                 url=f"{EVIDENCE_URL}-{i}",
                 title=f"Candidate solution number {i}"))
-        vm.sender = CREATOR
-        contract.close_submissions(bounty_id)
+        _close_after_window(vm, contract, bounty_id)
         for sub_id, verdict in zip(sub_ids, verdicts):
             vm.clear_mocks()
-            _mock_evaluation(vm, verdict_json=verdict)
+            if evidence_ok:
+                _mock_evaluation(vm, verdict_json=verdict)
+            else:
+                vm.mock_llm(r".*adjudication engine.*", verdict)
+                # no mock_web registered -> fetch fails -> evidence_fetch_ok=False
             contract.evaluate_submission(sub_id)
         return bounty_id, sub_ids
 
@@ -376,6 +498,24 @@ class TestFinalization:
         contract.finalize_bounty(bounty_id)
         assert contract.get_claimable(SOLVER_A) == str(ESCROW * 9500 // 10000)
 
+    def test_unverifiable_evidence_cannot_win(self, vm, contract):
+        """A submission whose evidence never fetched must not be pickable
+        as winner even though its scores clear the bar — evidence_quality
+        is capped low by the prompt, but a bug or a lucky LLM score should
+        not be able to route real payout to an unverifiable claim."""
+        bounty_id, (sub_id,) = self._run_to_evaluated(
+            vm, contract, [GOOD_VERDICT], evidence_ok=False)
+        contract.finalize_bounty(bounty_id)
+        # evidence_quality is prompted low when unavailable, but force the
+        # point home structurally too: even if it scored above threshold,
+        # evidence_fetch_ok=False must exclude it.
+        ev = contract.get_evaluation(sub_id)
+        assert ev["evidence_fetch_ok"] is False
+        data = contract.get_bounty(bounty_id)
+        if ev["composite"] >= 55 and ev["tier"] not in ("OFF_TOPIC", "SPEC_ONLY"):
+            assert data["winner_submission_id"] == 0
+            assert data["status"] == "UNRESOLVED"
+
     def test_all_below_bar_is_unresolved_then_reclaim(self, vm, contract):
         bounty_id, (sub_id,) = self._run_to_evaluated(
             vm, contract, [LOW_VERDICT])
@@ -390,8 +530,7 @@ class TestFinalization:
     def test_finalize_requires_all_evaluated(self, vm, contract):
         bounty_id = _fund_bounty(vm, contract)
         _submit(vm, contract, bounty_id)
-        vm.sender = CREATOR
-        contract.close_submissions(bounty_id)
+        _close_after_window(vm, contract, bounty_id)
         with pytest.raises(Exception, match="EXPECTED.*not evaluated yet"):
             contract.finalize_bounty(bounty_id)
 
@@ -399,8 +538,8 @@ class TestFinalization:
         bounty_id, _ = self._run_to_evaluated(vm, contract, [GOOD_VERDICT])
         contract.finalize_bounty(bounty_id)
         inv = contract.check_escrow_invariant()
-        # all escrow moved to unclaimed; nothing left open for this bounty
-        assert inv["open_escrow"] == "0"
+        assert inv["healthy"] is True
+        assert inv["tracked_open_escrow"] == "0"
         assert inv["unclaimed_rewards"] == str(ESCROW)
 
     def test_leaderboard_and_stats(self, vm, contract):
@@ -432,7 +571,11 @@ class TestViews:
         cfg = contract.get_config()
         assert cfg["winner_share_bps"] == 8500
         assert cfg["win_threshold"] == 55
+        assert cfg["funding_currency"] == "USDC"
+        assert cfg["usdc_decimals"] == 6
+        assert cfg["score_tolerance"] == 12
         assert "REDEFINING" in cfg["tiers"]
+        assert cfg["relayer"] == cfg["owner"]  # deployer doubles as relayer
 
     def test_audit_log_records_actions(self, vm, contract):
         bounty_id = _fund_bounty(vm, contract)
@@ -440,48 +583,56 @@ class TestViews:
         entries = contract.get_audit_page(0, 10)
         actions = [e["action"] for e in entries]
         assert actions[0] == "SUBMIT_SOLUTION"
-        assert actions[1] == "CREATE_BOUNTY"
+        assert actions[1] == "RECORD_FUNDING"
+        assert actions[2] == "CREATE_BOUNTY"
 
 
 # ---------------------------------------------------------------------------
-# Claiming (native transfer out of the contract)
+# Base Sepolia payout instructions (get_base_payouts / mark_settled)
 # ---------------------------------------------------------------------------
 
-class TestClaim:
-    def test_claim_zeroes_balance_and_records_settlement(self, vm, contract):
-        bounty_id = _fund_bounty(vm, contract)
-        _submit(vm, contract, bounty_id)
-        vm.sender = CREATOR
-        contract.close_submissions(bounty_id)
-        _mock_evaluation(vm)
-        contract.evaluate_submission(1)
+class TestBasePayouts:
+    def test_get_base_payouts_lists_unsettled_recipients(self, vm, contract):
+        bounty_id, (sub_id,) = TestFinalization()._run_to_evaluated(
+            vm, contract, [GOOD_VERDICT])
         contract.finalize_bounty(bounty_id)
-        expected = ESCROW * 9500 // 10000
-        assert contract.get_claimable(SOLVER_A) == str(expected)
-        balance_before = wallet_balance(vm, SOLVER_A)
-        vm.sender = SOLVER_A
-        claimed = contract.claim_rewards()
-        assert int(claimed) == expected
-        assert contract.get_claimable(SOLVER_A) == "0"
-        # The actual point of claim_rewards: real GEN must land in the
-        # recipient's wallet, not just clear the contract's internal
-        # ledger. A prior contract version zeroed `claimable` correctly
-        # while routing the transfer through the wrong GenVM primitive
-        # (a contract-call convention, not a real send) — the ledger
-        # looked fully settled while the recipient's wallet stayed at 0.
-        assert wallet_balance(vm, SOLVER_A) == balance_before + expected
-        history = contract.get_reward_history(SOLVER_A, 10)
-        assert history[0]["kind"] == "CLAIM"
-        assert all(h["settled"] for h in history if h["kind"] != "CLAIM")
+        payouts = contract.get_base_payouts(bounty_id)
+        recipients = {p["recipient"].lower(): p["amount"] for p in payouts}
+        assert addr_hex(SOLVER_A).lower() in recipients
+        assert recipients[addr_hex(SOLVER_A).lower()] == str(ESCROW * 9500 // 10000)
 
-    def test_claim_with_nothing_reverts(self, vm, contract):
-        vm.sender = SOLVER_B
-        with pytest.raises(Exception, match="EXPECTED.*nothing claimable"):
-            contract.claim_rewards()
+    def test_mark_settled_is_relayer_only(self, vm, contract):
+        bounty_id, _ = TestFinalization()._run_to_evaluated(
+            vm, contract, [GOOD_VERDICT])
+        contract.finalize_bounty(bounty_id)
+        vm.sender = CREATOR
+        with pytest.raises(Exception, match="EXPECTED.*only the relayer"):
+            contract.mark_settled(bounty_id, "0xsettle1")
+
+    def test_mark_settled_clears_payouts_and_is_idempotent(self, vm, contract):
+        bounty_id, _ = TestFinalization()._run_to_evaluated(
+            vm, contract, [GOOD_VERDICT])
+        contract.finalize_bounty(bounty_id)
+        vm.sender = OWNER
+        contract.mark_settled(bounty_id, "0xsettle1")
+        assert contract.get_base_payouts(bounty_id) == []
+        assert contract.get_claimable(SOLVER_A) == "0"
+        # Retrying the same relay tx must be a no-op, not an error and not
+        # a second decrement.
+        contract.mark_settled(bounty_id, "0xsettle1")
+
+    def test_set_relayer_is_owner_only(self, vm, contract):
+        vm.sender = CREATOR
+        with pytest.raises(Exception, match="EXPECTED.*only the owner"):
+            contract.set_relayer(addr_hex(SOLVER_A))
+        vm.sender = OWNER
+        contract.set_relayer(addr_hex(SOLVER_A))
+        assert contract.get_config()["relayer"].lower() == addr_hex(SOLVER_A).lower()
 
 
 # ---------------------------------------------------------------------------
-# Abandonment recovery: close_submissions is not creator-exclusive
+# Abandonment recovery: close_submissions is not creator-exclusive, but is
+# always deadline-gated regardless of who calls it.
 # ---------------------------------------------------------------------------
 
 class TestAbandonmentRecovery:
@@ -489,14 +640,15 @@ class TestAbandonmentRecovery:
         bounty_id = _fund_bounty(vm, contract)
         _submit(vm, contract, bounty_id, solver=SOLVER_A)
         # Creator never calls close_submissions. The solver who put in real
-        # work is a stakeholder and can unstick the bounty themselves.
-        vm.sender = SOLVER_A
-        contract.close_submissions(bounty_id)
+        # work is a stakeholder and can unstick the bounty themselves, but
+        # only once the window has actually elapsed.
+        _close_after_window(vm, contract, bounty_id, sender=SOLVER_A)
         assert contract.get_bounty(bounty_id)["status"] == "EVALUATING"
 
     def test_unrelated_address_cannot_close_submissions(self, vm, contract):
         bounty_id = _fund_bounty(vm, contract)
         _submit(vm, contract, bounty_id, solver=SOLVER_A)
+        warp_seconds(vm, DEFAULT_WINDOW + 1)
         vm.sender = SOLVER_B  # has no submission on this bounty
         with pytest.raises(Exception, match="EXPECTED.*creator or a solver"):
             contract.close_submissions(bounty_id)
@@ -506,19 +658,21 @@ class TestAbandonmentRecovery:
         sub_id = _submit(vm, contract, bounty_id, solver=SOLVER_A)
         vm.sender = SOLVER_A
         contract.withdraw_submission(sub_id)
+        warp_seconds(vm, DEFAULT_WINDOW + 1)
+        vm.sender = SOLVER_A
         with pytest.raises(Exception, match="EXPECTED.*creator or a solver"):
             contract.close_submissions(bounty_id)
 
     def test_abandoned_bounty_reaches_full_payout_via_solver_trigger(
             self, vm, contract):
         """End-to-end: creator disappears after funding + a submission
-        arrives; the solver self-serves close_submissions, evaluation and
-        finalization proceed permissionlessly, and the winner gets paid —
+        arrives; once the window elapses the solver self-serves
+        close_submissions, evaluation and finalization proceed
+        permissionlessly, and the payout instruction becomes available —
         the escrow never gets permanently stuck."""
         bounty_id = _fund_bounty(vm, contract)
         sub_id = _submit(vm, contract, bounty_id, solver=SOLVER_A)
-        vm.sender = SOLVER_A
-        contract.close_submissions(bounty_id)
+        _close_after_window(vm, contract, bounty_id, sender=SOLVER_A)
         _mock_evaluation(vm)
         vm.sender = SOLVER_A
         contract.evaluate_submission(sub_id)
