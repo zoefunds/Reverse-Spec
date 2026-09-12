@@ -6,23 +6,29 @@ function chainFor(network) {
   return network === "localnet" ? localnet : studionet;
 }
 
-const readClient = createClient({ chain: chainFor(config.genlayerNetwork) });
+// GenLayer's RPC requires a sender ("from") even for reads, so the
+// read-only client reuses the relayer's own account rather than an
+// anonymous one — it never signs a transaction for reads, just supplies
+// an address the RPC accepts.
+let sharedClient = null;
+function getSharedClient(logger) {
+  if (sharedClient) return sharedClient;
+  const account = createAccount(config.baseSepolia.relayerPrivateKey);
+  sharedClient = createClient({ chain: chainFor(config.genlayerNetwork), account });
+  if (logger) logger.info(`relayer GenLayer account ready: ${account.address}`);
+  return sharedClient;
+}
 
 export async function readContract(functionName, args = []) {
-  return readClient.readContract({
+  return getSharedClient().readContract({
     address: config.genlayerContractAddress,
     functionName,
     args,
   });
 }
 
-let writeClient = null;
 export function getWriteClient(logger) {
-  if (writeClient) return writeClient;
-  const account = createAccount(config.baseSepolia.relayerPrivateKey);
-  writeClient = createClient({ chain: chainFor(config.genlayerNetwork), account });
-  logger.info(`relayer GenLayer account ready: ${account.address}`);
-  return writeClient;
+  return getSharedClient(logger);
 }
 
 export async function writeAndWait(logger, functionName, args) {

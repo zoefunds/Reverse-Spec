@@ -1,0 +1,29 @@
+# Fly.io configuration — Reverse Spec relayer (Base Sepolia <-> GenLayer bridge)
+#
+# Background poller, no HTTP surface. Runs 24/7 so funding deposits and
+# payout settlements get relayed without a human driving it manually.
+
+app = "reverse-spec-relayer"
+primary_region = "iad"
+
+[build]
+
+[env]
+  GENLAYER_NETWORK = "studionet"
+  GENLAYER_CONTRACT_ADDRESS = "0x324dff69efA46b82BcE267F5Ad6d30C2281397Df"
+  BASE_SEPOLIA_RPC_URL = "https://sepolia.base.org"
+  BASE_SEPOLIA_USDC_ADDRESS = "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+  REVERSE_SPEC_ESCROW_ADDRESS = "0xCDfF36cDA76e08BAd2EA0d5a3fDaDf3761Ed5041"
+  BASE_SEPOLIA_STAKE_CONFIRMATIONS = "5"
+  RELAYER_POLL_INTERVAL_MS = "30000"
+  # Secret (set via `fly secrets set`): BASE_SEPOLIA_RELAYER_PRIVATE_KEY
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
+
+[processes]
+  app = "node index.js"
+
+[[restart]]
+  policy = "always"

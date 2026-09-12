@@ -105,5 +105,5 @@ export function startPayoutRelay(logger) {
     }
   };
   tick();
-  setInterval(tick, Math.max(config.pollIntervalMs, 30000)).unref();
+  setInterval(tick, Math.max(config.pollIntervalMs, 30000));
 }

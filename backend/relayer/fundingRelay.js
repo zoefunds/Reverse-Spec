@@ -84,7 +84,7 @@ export function startFundingRelay(logger) {
     }
   };
   tick();
-  setInterval(tick, Math.max(config.pollIntervalMs, 15000)).unref();
+  setInterval(tick, Math.max(config.pollIntervalMs, 15000));
 }
 
 // Re-exported for readContract-based reconciliation callers, if ever needed.
