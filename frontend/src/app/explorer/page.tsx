@@ -10,7 +10,7 @@ import {
 } from "@/components/ui";
 import { api, type Bounty } from "@/lib/api";
 import { readContract } from "@/lib/chain";
-import { formatGen } from "@/lib/format";
+import { formatUsdc } from "@/lib/format";
 
 const STATUSES = ["", "OPEN", "EVALUATING", "RESOLVED", "UNRESOLVED"] as const;
 const PAGE_SIZE = 10;
@@ -60,7 +60,7 @@ export default function ExplorerPage() {
       <header className="flex flex-col gap-1">
         <h1 className="font-head text-h1 text-ink">Bounty Explorer</h1>
         <p className="text-ink-soft">
-          Problems funded in native GEN, adjudicated by validator consensus.
+          Problems funded in USDC via a Base Sepolia escrow, adjudicated by validator consensus.
         </p>
       </header>
 
@@ -68,7 +68,7 @@ export default function ExplorerPage() {
         <StatCard label="Open bounties"
           value={chainStats ? chainStats.bounties_open : "—"} />
         <StatCard label="Escrow live" accent="text-tertiary"
-          value={chainStats ? `${formatGen(chainStats.open_escrow)} GEN` : "—"} />
+          value={chainStats ? `${formatUsdc(chainStats.open_escrow)} USDC` : "—"} />
         <StatCard label="Total submissions" accent="text-secondary"
           value={chainStats ? chainStats.submissions_total : "—"} />
       </div>

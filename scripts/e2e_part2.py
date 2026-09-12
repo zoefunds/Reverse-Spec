@@ -14,7 +14,7 @@ from genlayer_py.chains import studionet
 from genlayer_py.types import TransactionStatus
 
 CONTRACT = "0x1DD671F0b8Be9e6fB7e7F2078261e1B840AF4439"
-GEN = 10**18
+USDC = 10**6
 KEYS = os.path.join(os.path.dirname(__file__), ".e2e_keys.json")
 
 if os.path.exists(KEYS):
@@ -123,10 +123,13 @@ def main():
         "silent conflicts — the real problem is that our data model has no "
         "notion of concurrent editing. Conflict-free replicated data types "
         "or operational transforms may be the actual fix.",
-        "UX", "offline,sync,crdt,mobile", "2026-07-17", "2026-09-30",
-    ], value=12_000 * GEN, label="create_bounty #5 (12,000 GEN, lifecycle)")
+        "UX", "offline,sync,crdt,mobile", "2026-07-17", "2026-09-30", 3600,
+    ], label="create_bounty #5 (lifecycle)")
     stats = read("get_platform_stats")
     b5 = int(stats["bounties_total"])
+    write(c_creator, "record_funding",
+          [b5, creator.address, 12 * USDC, f"0xe2e-fund-{b5}"],
+          label=f"record_funding bounty {b5} (12.00 USDC)")
     print(f"   bounty #{b5}", flush=True)
 
     write(c_solver_a, "submit_solution", [
@@ -162,11 +165,17 @@ def main():
     print(f"   bounty {b5}: {bounty['status']} | "
           f"{bounty['resolution_summary'][:200]}", flush=True)
 
-    claimable = int(read("get_claimable", [solver_a.address]))
-    print(f"   solver_a claimable: {claimable / GEN:,.0f} GEN", flush=True)
-    if claimable:
-        write(c_solver_a, "claim_rewards", [], label="claim_rewards")
-        print(f"   after claim: {read('get_claimable', [solver_a.address])}",
+    payouts = read("get_base_payouts", [b5])
+    print(f"   base_payouts for bounty {b5}: {payouts}", flush=True)
+    solver_a_payout = next(
+        (p for p in payouts if p["recipient"].lower() == solver_a.address.lower()),
+        None)
+    if solver_a_payout:
+        print(f"   solver_a payout: {int(solver_a_payout['amount']) / USDC:,.2f} USDC",
+              flush=True)
+        write(c_creator, "mark_settled", [b5, f"0xe2e-settle-{b5}"],
+              label=f"mark_settled bounty {b5}")
+        print(f"   after mark_settled: {read('get_base_payouts', [b5])}",
               flush=True)
 
     inv = read("check_escrow_invariant")
@@ -175,9 +184,9 @@ def main():
     print("\n==== FINAL STATE ====", flush=True)
     print(f"bounties={stats['bounties_total']} "
           f"submissions={stats['submissions_total']} "
-          f"open_escrow={int(stats['open_escrow']) / GEN:,.0f} GEN "
-          f"unclaimed={int(stats['unclaimed_rewards']) / GEN:,.0f} GEN "
-          f"paid_out={int(stats['total_paid_out']) / GEN:,.0f} GEN", flush=True)
+          f"open_escrow={int(stats['open_escrow']) / USDC:,.2f} USDC "
+          f"unclaimed={int(stats['unclaimed_rewards']) / USDC:,.2f} USDC "
+          f"paid_out={int(stats['total_paid_out']) / USDC:,.2f} USDC", flush=True)
     print(f"invariant healthy={inv['healthy']}", flush=True)
     print(f"leaderboard top: {board[0] if board else 'empty'}", flush=True)
     print(f"elapsed {time.time() - t0:.0f}s", flush=True)

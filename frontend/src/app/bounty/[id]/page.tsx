@@ -12,7 +12,7 @@ import {
 } from "@/components/ui";
 import { api, type Bounty, type Submission } from "@/lib/api";
 import { waitForTx, writeContract } from "@/lib/chain";
-import { formatGen, shortAddress } from "@/lib/format";
+import { formatUsdc, shortAddress, formatDeadline, formatCountdown } from "@/lib/format";
 import { useWallet } from "@/lib/wallet";
 
 type TxPhase = "idle" | "signing" | "pending" | "done" | "failed";
@@ -115,12 +115,20 @@ export default function BountyDetailPage() {
           <span>·</span>
           <span>by {shortAddress(bounty.creator_address)}</span>
           {bounty.deadline_note && (<><span>·</span><span>target {bounty.deadline_note}</span></>)}
+          {bounty.submission_deadline > 0 && (
+            <>
+              <span>·</span>
+              <span title={formatDeadline(bounty.submission_deadline)}>
+                submissions {formatCountdown(bounty.submission_deadline)} ({formatDeadline(bounty.submission_deadline)})
+              </span>
+            </>
+          )}
         </div>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <h1 className="max-w-2xl font-head text-h1 text-ink">{bounty.title}</h1>
           <div className="text-right">
             <div className="font-mono text-h2 text-tertiary">
-              {formatGen(bounty.reward_escrow)} GEN
+              {formatUsdc(bounty.reward_escrow)} USDC
             </div>
             <StatusTag status={bounty.status} />
           </div>
@@ -296,7 +304,8 @@ export default function BountyDetailPage() {
               </div>
               <div className="mt-1 border-t border-line-soft pt-2 text-tag text-ink-faint">
                 No winner → full escrow reclaimable by creator. All movements
-                are native GEN transfers inside the contract.
+                are USDC transfers on the Base Sepolia escrow, claimed
+                separately from GenLayer&apos;s verdict.
               </div>
             </div>
           </Card>

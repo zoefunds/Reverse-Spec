@@ -82,6 +82,9 @@ class BountyOut(BaseModel):
     initial_escrow: str
     status: str
     deadline_note: str
+    submission_window_secs: int
+    opened_at: int
+    submission_deadline: int
     submission_count: int
     evaluated_count: int
     winner_submission_id: int

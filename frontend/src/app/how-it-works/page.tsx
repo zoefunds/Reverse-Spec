@@ -15,7 +15,7 @@ const FAQ = [
   },
   {
     q: "What exactly happens to the escrow?",
-    a: "Funding is a payable transaction: GEN moves from the creator's wallet into the contract. On finalization, 85% is credited to the winner, 10% to the runner-up (or to the winner if none), 5% back to the creator. Credits are claimed with a real native transfer out of the contract. If nothing meets the bar, the creator reclaims everything.",
+    a: "Funding happens in two steps: you create the bounty on GenLayer, then deposit USDC into the Base Sepolia escrow contract; a relayer confirms the deposit and opens the bounty. On finalization, 85% is allocated to the winner, 10% to the runner-up (or to the winner if none), 5% back to the creator. Allocations are claimed with a real USDC transfer straight from the escrow. If nothing meets the bar, the creator reclaims everything.",
   },
   {
     q: "How are evaluation disagreements handled?",

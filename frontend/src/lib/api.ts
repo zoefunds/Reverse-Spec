@@ -46,6 +46,9 @@ export interface Bounty {
   initial_escrow: string;
   status: string;
   deadline_note: string;
+  submission_window_secs: number;
+  opened_at: number;
+  submission_deadline: number;
   submission_count: number;
   evaluated_count: number;
   winner_submission_id: number;

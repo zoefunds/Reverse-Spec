@@ -85,6 +85,9 @@ def _upsert_bounty(db: Session, data: dict) -> bool:
     row.initial_escrow = int(data["initial_escrow"])
     row.status = data["status"]
     row.deadline_note = data.get("deadline_note", "")
+    row.submission_window_secs = int(data.get("submission_window_secs", 0))
+    row.opened_at = int(data.get("opened_at", 0))
+    row.submission_deadline = int(data.get("submission_deadline", 0))
     row.submission_count = int(data["submission_count"])
     row.evaluated_count = int(data["evaluated_count"])
     row.winner_submission_id = int(data.get("winner_submission_id", 0))
