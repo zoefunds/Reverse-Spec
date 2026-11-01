@@ -57,7 +57,7 @@ Status: complete and deployed to production on 2026-11-01.
   interrupted acknowledgement replay, poison-event isolation, finality and
   execution failure, the refund race, and active/passive leadership gating.
 - The production frontend is live at `https://reverse-spec.vercel.app` and the
-  replacement Fly services are `reverse-spec-production-api`,
+  current Fly services are `reverse-spec-production-api`,
   `reverse-spec-production-relayer`, and
   `reverse-spec-production-relayer-standby`.
 - Production relayers wait five Base Sepolia confirmations for funding,
@@ -65,17 +65,16 @@ Status: complete and deployed to production on 2026-11-01.
 
 ### Hosted CI account blocker
 
-Commit `301a0b3` triggered CI run `41305757094` (contract, backend, frontend,
-relayer, and Base escrow jobs) and secret-scan run `41305757068`. GitHub did not
-start any job and annotated each with: `The job was not started because your
-account is locked due to a billing issue.` This is an external account/billing
-blocker rather than a repository test failure. The equivalent local release
-matrix and full-history gitleaks scan pass as recorded above; hosted green runs
-require the repository owner to unlock GitHub Actions billing and rerun them.
-The authenticated GitHub Billing overview identifies the underlying account
-condition as `Your payment authorization has failed` and directs the owner to
-contact the bank or update the payment method. A rerun on 2026-11-01 reproduced
-the same pre-run lock before any workflow step executed.
+GitHub does not start any CI or secret-scan job and annotates each with:
+`The job was not started because your account is locked due to a billing
+issue.` The authenticated Billing overview identifies the underlying condition
+as `Your payment authorization has failed` and directs the owner to contact the
+bank or update the payment method. Repeated reruns on 2026-11-01 reproduced the
+same pre-run lock before any workflow step executed. This is an external
+account/billing blocker rather than a repository test failure. The equivalent
+local release matrix and full-history gitleaks scan pass as recorded above;
+hosted green runs require the repository owner to restore payment authorization
+and rerun both workflows.
 
 ## Current deployment funding smoke
 
@@ -132,27 +131,3 @@ evidence lookup hit Base's 200-block `eth_getLogs` cap. The release runner now
 queries settlement logs in bounded chunks, and `npm run e2e:evidence` provides
 read-only chunked recovery. The on-chain event record above proves settlement
 and both claims completed before that reporting-only error.
-
-## Historical full payment-path evidence
-
-The following full consensus run was completed on the immediately preceding,
-now-retired contract pair before the atomic activation upgrade. It remains
-evidence for the real evaluation and 85/10/5 settlement path, not a current
-deployment address reference.
-
-- Bounty: `1`; real Base deposit: `5,000,000` USDC units.
-- Base funding transaction:
-  `0x506953a913f8b420f22f6d0fdc4020f3cc4c828529199699ee3791df04ae3022`.
-- GenLayer solver submission:
-  `0x8a3a546e7afd09d40cd68b6463b425cbebee47706843ae4e223b82c2d9b85336`.
-- Automatic Base settlement:
-  `0xa2ad3d0f7f23e6813d4b54b21109d30bb99970847340e96cab562308e12e91fa`.
-- Creator claim (`250,000` units):
-  `0xc0e708a80dc6347ba7c4ccdcbed5488d1d5bd360a5b6dbd07e0a70d02c36e033`.
-- Solver claim (`4,750,000` units):
-  `0x5e1f5610d451cbc175c36dc22828e0d67dbf130e987c2971bfa23b5488dbd740`.
-- Runner result: `PASS bounty=1 creator_claim=250000 solver_claim=4750000`.
-
-The exposed historical E2E wallets were retired, their remaining balances were
-swept, and the tracked credential file was removed from current and rewritten
-remote Git history before this deployment.

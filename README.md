@@ -24,11 +24,12 @@ AI-validator consensus, not by any company or server.
 GenLayer contract. See "Why this needs GenLayer" and
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) below for the current design.
 
-The complete payment path was proven live on 2026-11-01 with a real 5 USDC
-consensus run. After the atomic funding-activation upgrade, the current
-coordinated pair was separately proven with a real 1 USDC
-commitment/acknowledgement/activation/cancellation/settlement/claim smoke.
-Transaction evidence for both runs is recorded in
+The current coordinated pair completed the full payment path on 2026-11-01:
+real 1 USDC funding, automatic commitment/acknowledgement/activation,
+independent consensus evaluation, finalization, Base settlement, and exact
+0.05 USDC creator / 0.95 USDC solver claims. It also completed a separate
+1 USDC cancellation-to-creator recovery smoke. Current transaction evidence is
+recorded in
 [remediation-milestone.md](remediation-milestone.md).
 
 ## Why this needs GenLayer

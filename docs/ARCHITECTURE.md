@@ -2,7 +2,8 @@
 
 Current production endpoints and addresses are maintained in
 [`../MEMORY.md`](../MEMORY.md). The active Fly services are
-`reverse-spec-production-api` and `reverse-spec-production-relayer`.
+`reverse-spec-production-api`, `reverse-spec-production-relayer`, and
+`reverse-spec-production-relayer-standby`.
 
 ## Division of responsibility
 

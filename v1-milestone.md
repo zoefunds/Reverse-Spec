@@ -45,7 +45,7 @@ automatically acknowledged on GenLayer, evaluated by consensus, automatically
 settled on Base, and claimed as 0.95 USDC by the sole winner and 0.05 USDC by
 the creator. The pair also passed a separate real 1 USDC commitment →
 acknowledgement → activation → cancellation → settlement → creator-claim
-smoke. Current and historical transaction evidence is kept separate in
+smoke. Current transaction evidence is in
 [remediation-milestone.md](remediation-milestone.md).
 
 Verification baseline: 52 contract tests, 13 backend tests, 12 relayer tests, 4

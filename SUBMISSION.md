@@ -105,4 +105,4 @@ acting in good faith to pay out.
 
 Live: GenLayer contract `0x75B9094aCd67bfC450B07fFA07A63b2446260Eaf`,
 Base escrow `0x7e83C2136f9C6e259187E737501086bc84EC0595`, frontend on Vercel, and
-replacement backend/relayer apps on Fly.io — see [README.md](README.md).
+current backend/relayer apps on Fly.io — see [README.md](README.md).

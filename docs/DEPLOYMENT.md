@@ -170,6 +170,11 @@ relayer tests, Foundry escrow tests, and the frontend build on every push.
 `.github/workflows/secret-scan.yml` scans complete history. Deploys stay manual
 (`fly deploy` / `vercel --prod`) so a human gates production.
 
+As of 2026-11-01, GitHub blocks all hosted jobs before execution because the
+account's payment authorization failed. The complete local release matrix and
+full-history secret scan pass; hosted runs require the account owner to restore
+GitHub billing and rerun both workflows.
+
 ## Monitoring
 
 - `/healthz` — DB + indexer + contract address snapshot (Fly checks this)

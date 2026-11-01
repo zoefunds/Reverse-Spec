@@ -80,9 +80,9 @@ the actual USDC.
 
 - 52 Intelligent Contract direct tests.
 - 13 backend API tests.
-- 12 relayer tests, including missing-result, non-final, and failed-execution rejection,
-  interrupted acknowledgment replay, poison-event isolation, the seven-day
-  refund race, and active/passive leadership gating.
+- 12 relayer tests, including missing-result, non-final, and failed-execution
+  rejection, interrupted acknowledgment replay, poison-event isolation, the
+  seven-day refund race, and active/passive leadership gating.
 - 4 Foundry escrow lifecycle tests.
 - Next.js production build passes.
 - Live API health reports database and indexer healthy.
