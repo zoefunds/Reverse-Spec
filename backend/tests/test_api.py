@@ -3,6 +3,15 @@
 from eth_account import Account
 from eth_account.messages import encode_defunct
 
+from app.core.config import Settings
+
+
+def test_fly_postgres_url_is_normalized_for_psycopg3():
+    settings = Settings(database_url="postgres://user:pass@db.internal/app")
+    assert settings.sqlalchemy_database_url == (
+        "postgresql+psycopg://user:pass@db.internal/app"
+    )
+
 
 def _sign_in(client):
     """Full nonce -> sign -> verify flow with a throwaway key."""

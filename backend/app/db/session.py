@@ -15,7 +15,7 @@ def get_engine():
     global _engine, _SessionLocal
     if _engine is None:
         settings = get_settings()
-        _engine = create_engine(settings.database_url, pool_pre_ping=True,
+        _engine = create_engine(settings.sqlalchemy_database_url, pool_pre_ping=True,
                                 pool_size=5, max_overflow=10)
         _SessionLocal = sessionmaker(bind=_engine, autoflush=False,
                                      expire_on_commit=False)

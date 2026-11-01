@@ -46,6 +46,15 @@ class Settings(BaseSettings):
     hidden_bounty_ids: str = ""
 
     @property
+    def sqlalchemy_database_url(self) -> str:
+        """Normalize provider URLs for SQLAlchemy 2 and psycopg 3."""
+        if self.database_url.startswith("postgres://"):
+            return "postgresql+psycopg://" + self.database_url[len("postgres://"):]
+        if self.database_url.startswith("postgresql://"):
+            return "postgresql+psycopg://" + self.database_url[len("postgresql://"):]
+        return self.database_url
+
+    @property
     def hidden_bounty_id_set(self) -> set[int]:
         return {int(x) for x in self.hidden_bounty_ids.split(",") if x.strip()}
 
