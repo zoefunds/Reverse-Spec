@@ -1,5 +1,6 @@
 import { createClient, createAccount } from "genlayer-js";
 import { studionet, localnet } from "genlayer-js/chains";
+import { ExecutionResult, TransactionStatus } from "genlayer-js/types";
 import { config } from "./config.js";
 
 function chainFor(network) {
@@ -31,12 +32,32 @@ export function getWriteClient(logger) {
   return getSharedClient(logger);
 }
 
-export function assertSuccessfulExecution(receipt, functionName = "transaction") {
+/** Require durable finalization and successful contract execution.
+ * Prefer the SDK's canonical execution-result field. StudioNet's compatibility
+ * RPC omits that field, so use its detailed leader receipt only as a fallback.
+ */
+export function assertFinalizedSuccess(receipt, functionName = "transaction") {
   const normalized = plain(receipt);
+  const status = normalized.statusName ?? normalized.status_name;
+  const finalized = status === TransactionStatus.FINALIZED ||
+    Number(normalized.status) === 7;
+  if (!finalized) {
+    throw new Error(`${functionName} did not reach FINALIZED (status=${status ?? normalized.status ?? "unknown"})`);
+  }
+
+  if (normalized.txExecutionResultName != null) {
+    if (normalized.txExecutionResultName !== ExecutionResult.FINISHED_WITH_RETURN) {
+      throw new Error(
+        `${functionName} finalized but contract execution failed: ${normalized.txExecutionResultName}`,
+      );
+    }
+    return normalized;
+  }
+
   const leaders = (normalized.consensus_data?.leader_receipt ?? [])
     .filter((item) => item?.mode === "leader");
   if (leaders.length === 0) {
-    throw new Error(`${functionName} accepted without a leader execution receipt`);
+    throw new Error(`${functionName} finalized without an execution result`);
   }
   const execution = leaders.at(-1);
   const genvm = execution.genvm_result ?? {};
@@ -45,10 +66,12 @@ export function assertSuccessfulExecution(receipt, functionName = "transaction")
       genvm.error_code != null || (returned != null && returned !== "return")) {
     const detail = genvm.error_description ?? genvm.error_code ??
       execution.execution_result ?? "unknown execution failure";
-    throw new Error(`${functionName} accepted but contract execution failed: ${detail}`);
+    throw new Error(`${functionName} finalized but contract execution failed: ${detail}`);
   }
   return normalized;
 }
+
+export const assertSuccessfulExecution = assertFinalizedSuccess;
 
 export async function writeAndWait(logger, functionName, args, deps = {}) {
   const client = deps.client ?? getWriteClient(logger);
@@ -60,12 +83,11 @@ export async function writeAndWait(logger, functionName, args, deps = {}) {
   });
   const receipt = await client.waitForTransactionReceipt({
     hash,
-    status: "ACCEPTED",
+    status: TransactionStatus.FINALIZED,
     interval: 3000,
-    retries: 60,
-    fullTransaction: true,
+    retries: 120,
   });
-  assertSuccessfulExecution(receipt, functionName);
+  assertFinalizedSuccess(receipt, functionName);
   return hash;
 }
 

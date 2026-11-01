@@ -23,13 +23,13 @@ test("normalizes nested GenLayer map results for payout discovery", () => {
   });
 });
 
-test("ACCEPTED GenLayer transaction with failed execution is rejected", async () => {
+test("finalized GenLayer transaction with failed execution is rejected", async () => {
   let hash = 0;
   const client = {
     async writeContract() { hash += 1; return `0x${hash}`; },
     async waitForTransactionReceipt() {
       return {
-        statusName: "ACCEPTED",
+        statusName: "FINALIZED",
         consensus_data: { leader_receipt: [{
           mode: "leader",
           execution_result: "ERROR",
@@ -41,18 +41,48 @@ test("ACCEPTED GenLayer transaction with failed execution is rejected", async ()
   };
   await assert.rejects(
     writeAndWait(logger, "record_funding", [1], { client }),
-    /accepted but contract execution failed/,
+    /finalized but contract execution failed/,
   );
 });
 
-test("successful leader execution is required after ACCEPTED", () => {
+test("non-final GenLayer transaction is rejected even with successful execution", () => {
+  assert.throws(() => assertSuccessfulExecution({
+    statusName: "ACCEPTED",
+    consensus_data: { leader_receipt: [{
+      mode: "leader", execution_result: "SUCCESS",
+      genvm_result: { raw_error: null, error_code: null },
+      result: { status: "return" },
+    }] },
+  }, "record_funding"), /did not reach FINALIZED/);
+});
+
+test("canonical finalized execution result is preferred when available", () => {
   assert.doesNotThrow(() => assertSuccessfulExecution({
+    statusName: "FINALIZED",
+    txExecutionResultName: "FINISHED_WITH_RETURN",
+  }, "record_funding"));
+  assert.throws(() => assertSuccessfulExecution({
+    statusName: "FINALIZED",
+    txExecutionResultName: "FINISHED_WITH_ERROR",
+  }, "record_funding"), /contract execution failed/);
+});
+
+test("successful finalized StudioNet leader execution is accepted", () => {
+  assert.doesNotThrow(() => assertSuccessfulExecution({
+    status_name: "FINALIZED",
     consensus_data: { leader_receipt: [{
       mode: "leader", execution_result: "SUCCESS",
       genvm_result: { raw_error: null, error_code: null },
       result: { status: "return" },
     }] },
   }, "record_funding"));
+});
+
+test("finalized receipt without independent execution evidence is rejected", () => {
+  assert.throws(() => assertSuccessfulExecution({
+    statusName: "FINALIZED",
+    consensus_data: { leader_receipt: [] },
+  }, "record_funding"), /finalized without an execution result/);
 });
 
 test("failed GenLayer execution stays queued and never acknowledges Base", async () => {
@@ -77,7 +107,7 @@ test("failed GenLayer execution stays queued and never acknowledges Base", async
     async writeAndWait() {
       attempts += 1;
       if (attempts === 1) {
-        throw new Error("record_funding accepted but contract execution failed");
+        throw new Error("record_funding finalized but contract execution failed");
       }
     },
   };

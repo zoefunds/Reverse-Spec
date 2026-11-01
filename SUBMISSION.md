@@ -42,7 +42,7 @@ Real USDC moves through a Base Sepolia escrow:
 
 1. The creator creates a uniquely referenced bounty shell on GenLayer, then
    approves and deposits USDC into `ReverseSpecEscrow` on Base Sepolia.
-2. The standing relayer observes the confirmed deposit and records a non-active
+2. The active relayer observes the confirmed deposit and records a non-active
    funding commitment on GenLayer. It then acknowledges the deposit on Base and
    explicitly activates the bounty on GenLayer. Only activation opens the
    bounty for submissions. A mistaken unacknowledged deposit becomes refundable
@@ -59,12 +59,15 @@ Real USDC moves through a Base Sepolia escrow:
 6. The relayer executes those consensus-derived allocations on Base, and each
    recipient calls `claim()` to receive actual USDC.
 
-The full consensus path was tested on 2026-11-01 without synthetic funding or
-settlement identifiers: 5 USDC was deposited, automatically acknowledged,
-evaluated, settled, and claimed as 4.75 USDC by the sole winner and 0.25 USDC
-by the creator. After the atomic activation upgrade, the current contract pair
-separately passed a real 1 USDC commitment, acknowledgement, activation,
-cancellation, settlement, and claim smoke. See
+The relay is deployed active/passive across two Fly apps. A shared PostgreSQL
+advisory lease admits exactly one writer, while separate encrypted replay
+volumes let the standby take over without losing historical recovery state.
+
+The full consensus path was tested on the current production pair on 2026-11-01
+without synthetic funding or settlement identifiers: 1 USDC was deposited,
+automatically acknowledged, independently evaluated, settled, and claimed as
+0.95 USDC by the sole winner and 0.05 USDC by the creator. The same pair also
+passed a separate 1 USDC cancellation/refund-to-creator smoke. See
 [remediation-milestone.md](remediation-milestone.md).
 
 ## How to use it

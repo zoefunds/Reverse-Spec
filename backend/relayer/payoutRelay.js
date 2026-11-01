@@ -59,7 +59,10 @@ async function relayBounty(logger, bountyId, escrow) {
   }
 
   const tx = await escrow.settle(bountyId, recipients, amounts);
-  const receipt = await tx.wait();
+  const receipt = await tx.wait(config.baseSepolia.confirmations);
+  if (receipt?.status != null && Number(receipt.status) !== 1) {
+    throw new Error(`bounty ${bountyId}: Base settlement reverted`);
+  }
   await writeAndWait(logger, "mark_settled", [bountyId, receipt.hash.toLowerCase()]);
   payoutRelayState.settled += 1;
   logger.info(`bounty ${bountyId} settled on Base Sepolia: tx=${receipt.hash}`);

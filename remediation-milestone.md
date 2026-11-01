@@ -9,8 +9,14 @@ Status: complete and deployed to production on 2026-11-01.
   `record_funding` (non-active commitment), `acknowledgeDeposit` on Base, and
   `activate_funding` on GenLayer. `fundingRelay.test.js` covers
   interruption/restart and proves a poison event cannot block later ranges.
-- GenLayer `ACCEPTED` is not treated as application success. The relayer requires
-  a successful leader execution receipt and keeps failed executions queued.
+- GenLayer writes count only after `FINALIZED` and successful contract
+  execution. The relayer prefers the SDK's canonical execution-result field,
+  uses StudioNet's detailed leader receipt only as a compatibility fallback,
+  and keeps non-final or failed executions queued.
+- Two independently hosted Fly relayer apps use separate encrypted replay
+  volumes and a shared PostgreSQL session advisory lease. Only one submits
+  writes; a live primary-stop → standby-takeover → primary-failback drill
+  verified automatic process redundancy.
 - The seven-day refund race is safe: before Base acknowledgement the bounty is
   only `FUNDING_COMMITTED`; a successful refund triggers `void_funding`. If
   acknowledgement wins, the deposit is non-refundable and activation retries
@@ -47,10 +53,15 @@ Status: complete and deployed to production on 2026-11-01.
 - Frontend production build passes.
 - `ReverseSpecEscrow.sol` compiles with the pinned local `solcjs`.
 - `git diff --check` passes.
-- 13 backend API tests and seven relayer tests pass.
+- 13 backend API tests and 12 relayer tests pass. Relayer coverage includes
+  interrupted acknowledgement replay, poison-event isolation, finality and
+  execution failure, the refund race, and active/passive leadership gating.
 - The production frontend is live at `https://reverse-spec.vercel.app` and the
-  replacement Fly services are `reverse-spec-production-api` and
-  `reverse-spec-production-relayer`.
+  replacement Fly services are `reverse-spec-production-api`,
+  `reverse-spec-production-relayer`, and
+  `reverse-spec-production-relayer-standby`.
+- Production relayers wait five Base Sepolia confirmations for funding,
+  acknowledgement, and settlement transactions.
 
 ## Current deployment funding smoke
 
@@ -66,6 +77,47 @@ cancellation → automatic Base settlement → claim.
 - Base claim (`1,000,000` units):
   `0x2e1ce4c01742af6c479a04359d35d961bfdcb72e29bc7bed7e3b0c6ae1787e40`.
 - Runner result: `PASS bounty=1 deposit=1 claimed=1000000`.
+
+## Current deployment full payment path
+
+Bounty `2` completed the full release gate on the current production pair with
+`1,000,000` USDC units. Funding was automatically committed, acknowledged, and
+activated; the solver submission was independently evaluated; the sole winner
+received 95% and the creator 5%; the relayer settled Base; and both recipients
+claimed the exact allocated balances.
+
+- GenLayer creation:
+  `0xae7feb41a2ea80865aeb47a431384047bcc4f71e2e25179cecd05d251e4c2584`.
+- Base USDC approval:
+  `0x5215e52b2dc9544b23105a4dc613a08ceb95817dec2a63ce467747f4b73f98e2`.
+- Base funding (deposit `2`):
+  `0x331e7cf320ab8b1c3c9748ed5572696fa5561ec671714be18fca61fac3cdcb65`.
+- GenLayer funding commitment:
+  `0x220e0cb5c03b6d16fb878abb2d8463fc7aa0babab37ed94403d5c4ac51a83756`.
+- GenLayer activation:
+  `0xac91b3c14af7139e3465e29d6c5f0c06817fd7482354fe820755b354cab710b1`.
+- GenLayer solver submission:
+  `0x6987e9285a65010c81261b6821500d627d826f4f9a617de039cb68bd58339d6a`.
+- GenLayer submission close:
+  `0x7344c3f66ed18771b8ace6c974f8b06fe395b57c2e37bc97a36c375955983f59`.
+- GenLayer consensus evaluation:
+  `0xb910b33cf5a057fafd1d341dbb2470cf91a80d67c6b29c1f6aec7787c8659088`.
+- GenLayer finalization:
+  `0xf817fe70aaf319afc8026c85a3f580a70cf14c1cf8d0166bcfd0361e91b2b9f6`.
+- Automatic Base settlement:
+  `0x8ef3ec1a76065de714f0f711542436db7921e6ab81a051d87544243840f1b4f2`.
+- Creator claim (`50,000` units):
+  `0xdf1dfa62aa76e70ede78dd3a072c988b6700bed83eb6019635d715bfc6c10b55`.
+- Solver claim (`950,000` units):
+  `0x282c817e7319763f3e42ebd1610f6396cb1b3ec17a95d32e12706f4462c654d3`.
+- GenLayer settlement acknowledgement:
+  `0xf1ee14fbae2c3e5a9f840e9fdaf0747719aef48eff87c00d4391d45ed8cafa57`.
+
+The first runner invocation completed every financial action but its final
+evidence lookup hit Base's 200-block `eth_getLogs` cap. The release runner now
+queries settlement logs in bounded chunks, and `npm run e2e:evidence` provides
+read-only chunked recovery. The on-chain event record above proves settlement
+and both claims completed before that reporting-only error.
 
 ## Historical full payment-path evidence
 

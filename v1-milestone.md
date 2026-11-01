@@ -19,6 +19,8 @@ and transaction hashes are in
 - Added unique creation references, creator/funder binding, per-deposit
   acknowledgment, and delayed recovery for mistaken unacknowledged deposits.
 - Added durable historical event replay and persistent retry state.
+- Added active/passive relayer hosting with a shared PostgreSQL advisory lease
+  and independently durable replay volumes.
 
 ## Current production deployment
 
@@ -32,18 +34,19 @@ and transaction hashes are in
 | API | `https://reverse-spec-production-api.fly.dev` |
 | Fly API app | `reverse-spec-production-api` |
 | Fly relayer app | `reverse-spec-production-relayer` |
+| Fly standby relayer | `reverse-spec-production-relayer-standby` |
 | Fly database | `reverse-spec-production-db` |
 
 ## Acceptance result
 
-The full payment-path regression passed on the preceding coordinated pair with
-no synthetic funding or settlement identifiers: 5 USDC was deposited on Base,
+The full payment-path regression passed on the current coordinated pair with
+no synthetic funding or settlement identifiers: 1 USDC was deposited on Base,
 automatically acknowledged on GenLayer, evaluated by consensus, automatically
-settled on Base, and claimed as 4.75 USDC by the sole winner and 0.25 USDC by
-the creator. After the atomic activation upgrade, the current pair passed a
-real 1 USDC commitment → acknowledgement → activation → cancellation →
-settlement → claim smoke. Current and historical transaction evidence is kept
-separate in [remediation-milestone.md](remediation-milestone.md).
+settled on Base, and claimed as 0.95 USDC by the sole winner and 0.05 USDC by
+the creator. The pair also passed a separate real 1 USDC commitment →
+acknowledgement → activation → cancellation → settlement → creator-claim
+smoke. Current and historical transaction evidence is kept separate in
+[remediation-milestone.md](remediation-milestone.md).
 
-Verification baseline: 52 contract tests, 13 backend tests, 7 relayer tests, 4
+Verification baseline: 52 contract tests, 13 backend tests, 12 relayer tests, 4
 Foundry escrow tests, and a successful frontend production build.

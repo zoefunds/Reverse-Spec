@@ -7,15 +7,16 @@ next, roughly in order:
 
 ## Near-term (protocol hardening)
 
-- **Relayer decentralization / liveness.** The v1 split-custody design
-  depends on a single trusted relayer address to bridge Base Sepolia
+- **Relayer decentralization.** The active/passive Fly deployment now removes
+  the single-process liveness dependency, but v1 still depends on one trusted
+  relayer address to bridge Base Sepolia
   funding/settlement events into GenLayer (`record_funding` → Base
   acknowledgement → `activate_funding`, plus `mark_settled`) and back
   (`get_base_payouts` → `settle()`). Refunded deposits are reconciled with
   `void_funding`. It's
-  owner-rotatable (`set_relayer`) but still a single point of liveness
-  failure; multi-relayer or watchtower redundancy is the natural next
-  hardening step now that funds live off GenLayer entirely.
+  owner-rotatable (`set_relayer`) but remains a trust boundary. A threshold or
+  permissionless proof-based bridge is the natural next step now that process
+  failover is covered.
 - **Dispute window.** Currently `finalize_bounty` is final once validators
   agree. A short challenge period where a rejected solver can request
   re-evaluation with additional evidence would reduce the cost of a bad

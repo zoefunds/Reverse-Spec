@@ -11,6 +11,8 @@ export const config = {
   genlayerContractAddress: process.env.GENLAYER_CONTRACT_ADDRESS ?? "",
   pollIntervalMs: parseInt(process.env.RELAYER_POLL_INTERVAL_MS ?? "30000", 10),
   logLevel: process.env.LOG_LEVEL ?? "info",
+  databaseUrl: process.env.DATABASE_URL ?? "",
+  instanceName: process.env.FLY_APP_NAME ?? process.env.HOSTNAME ?? "local-relayer",
   stateFile: process.env.RELAYER_STATE_FILE ?? "./relayer-state.json",
   baseSepolia: {
     rpcUrl: process.env.BASE_SEPOLIA_RPC_URL ?? "https://sepolia.base.org",
@@ -29,7 +31,9 @@ export const config = {
     // Blocks to wait behind the chain head before treating a `Funded`
     // deposit as final.
     confirmations: parseInt(
-      process.env.BASE_SEPOLIA_STAKE_CONFIRMATIONS ?? "5",
+      process.env.BASE_SEPOLIA_CONFIRMATIONS ??
+        process.env.BASE_SEPOLIA_STAKE_CONFIRMATIONS ??
+        "5",
       10,
     ),
     fundingStartBlock: parseInt(

@@ -19,10 +19,9 @@ const hash = await client.deployContract({ code, args: [] });
 console.log(`Deployment transaction: ${hash}`);
 const receipt = await client.waitForTransactionReceipt({
   hash,
-  status: TransactionStatus.ACCEPTED,
+  status: TransactionStatus.FINALIZED,
   interval: 5000,
-  retries: 180,
-  fullTransaction: true,
+  retries: 240,
 });
 assertSuccessfulExecution(receipt, "deployContract");
 console.log(JSON.stringify({

@@ -23,6 +23,7 @@ the actual USDC.
 | Fly API | `https://reverse-spec-production-api.fly.dev` |
 | Fly API app | `reverse-spec-production-api` (2 machines, `iad`) |
 | Fly relayer app | `reverse-spec-production-relayer` (persistent volume, `iad`) |
+| Fly standby relayer | `reverse-spec-production-relayer-standby` (persistent volume, `iad`) |
 | Fly Postgres | `reverse-spec-production-db` |
 | GenLayer StudioNet contract | `0x75B9094aCd67bfC450B07fFA07A63b2446260Eaf` |
 | GenLayer deployment tx | `0xff3f9fba5dcbdd9dc53f570032429b386a192b05f05988867bf02609a396b5c5` |
@@ -41,8 +42,13 @@ the actual USDC.
 - The Node relayer is a standing, owner-rotatable bridge. Funding events enter
   an atomic persistent queue before the scan cursor advances. Each deposit
   retries independently across restarts through GenLayer commitment, Base
-  acknowledgment, and GenLayer activation. ACCEPTED transactions count only
-  when the leader execution receipt reports `SUCCESS`.
+  acknowledgment, and GenLayer activation. Writes count only after GenLayer
+  `FINALIZED` status and successful contract execution; the canonical SDK
+  execution result is preferred, with the detailed StudioNet leader receipt as
+  a compatibility fallback while that RPC omits the canonical field.
+- Relayer writes require a PostgreSQL session advisory lease. The primary and
+  standby Fly apps have separate durable replay volumes; only the lease holder
+  runs funding/payout loops, and a live failover/failback drill passed.
 - Creation uses a unique `creation_ref`; the UI resolves the exact bounty from
   that reference. `record_funding` rejects a funder other than the creator.
 - An unacknowledged deposit can be refunded after seven days. Acknowledged
@@ -74,15 +80,20 @@ the actual USDC.
 
 - 52 Intelligent Contract direct tests.
 - 13 backend API tests.
-- 7 relayer tests, including ACCEPTED-with-failed-execution rejection,
-  interrupted acknowledgment replay, poison-event isolation, and the seven-day
-  refund race.
+- 12 relayer tests, including missing-result, non-final, and failed-execution rejection,
+  interrupted acknowledgment replay, poison-event isolation, the seven-day
+  refund race, and active/passive leadership gating.
 - 4 Foundry escrow lifecycle tests.
 - Next.js production build passes.
 - Live API health reports database and indexer healthy.
 - Live bounty 1 on the current deployment completed the fast real-value smoke:
   1 USDC deposit → commitment → automatic Base acknowledgement → activation →
   cancellation → automatic Base settlement → 1 USDC creator claim.
+- Live bounty 2 completed the full current-deployment release gate: 1 USDC
+  deposit → automatic activation → solver submission → independent consensus
+  evaluation → finalization → automatic Base settlement → exact 0.05 USDC
+  creator and 0.95 USDC solver claims. All transaction hashes are recorded in
+  `remediation-milestone.md`.
 
 ## Security incident closure
 

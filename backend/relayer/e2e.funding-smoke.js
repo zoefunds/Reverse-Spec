@@ -35,8 +35,7 @@ async function write(functionName, args) {
     address: config.genlayerContractAddress, functionName, args, value: 0n,
   });
   const receipt = await client.waitForTransactionReceipt({
-    hash, status: TransactionStatus.ACCEPTED, interval: 3000, retries: 120,
-    fullTransaction: true,
+    hash, status: TransactionStatus.FINALIZED, interval: 3000, retries: 240,
   });
   assertSuccessfulExecution(receipt, functionName);
   return hash;

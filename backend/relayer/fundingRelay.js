@@ -108,7 +108,7 @@ export async function scanAndApply(logger, deps = {}) {
       const alreadyAcknowledged = Boolean(onchain && (onchain.acknowledged ?? onchain[4]));
       if (!alreadyAcknowledged) {
         const ackTx = await escrow.acknowledgeDeposit(depositId);
-        const ackReceipt = await ackTx.wait();
+        const ackReceipt = await ackTx.wait(config.baseSepolia.confirmations);
         if (ackReceipt?.status != null && Number(ackReceipt.status) !== 1) {
           throw new Error(`Base acknowledgement reverted for deposit=${depositId}`);
         }

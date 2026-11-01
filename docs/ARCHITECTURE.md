@@ -10,7 +10,7 @@ Current production endpoints and addresses are maintained in
 |---|---|---|
 | Intelligent Contract (GenLayer StudioNet) | Bounty lifecycle, submissions, LLM evaluations, payout *decisions* | Source of truth for judging — consensus-verified; holds no funds |
 | ReverseSpecEscrow.sol (Base Sepolia) | USDC custody — `fund`, `settle`, `claim` | Source of truth for *funds*; executes payout instructions relayed from GenLayer |
-| backend/relayer/ (Node) | Bridges funding with `record_funding` → Base acknowledgement → `activate_funding`; relays payouts with `settle()` → `mark_settled` | Trusted relayer identity (owner-rotatable via `set_relayer`); moves no judgment, only confirmed events |
+| backend/relayer/ (Node) | Active/passive bridge: funding uses `record_funding` → Base acknowledgement → `activate_funding`; payouts use `settle()` → `mark_settled` | Trusted relayer identity (owner-rotatable via `set_relayer`); PostgreSQL lease permits one writer while a standby provides liveness |
 | FastAPI backend (Fly.io) | Auth sessions, search/filter read-model, indexer, monitoring | Untrusted cache; self-heals from chain |
 | PostgreSQL | Mirrors + users/profiles + audit log | Rebuildable from chain state |
 | Next.js frontend (Vercel) | UI; signs all transactions client-side | Holds no secrets, no keys |
@@ -40,6 +40,12 @@ arbitrary external chain), so custody is split from judgment:
   Base, then confirms with `mark_settled(bounty_id, base_tx_hash)` on
   GenLayer. All GenLayer-side confirmations are idempotent on
   `base_tx_hash` so a retried relay can never double-count.
+
+The trusted identity remains singular, but the process is redundant. Two Fly
+apps maintain independent encrypted replay volumes and compete for a shared
+PostgreSQL session advisory lock. Only the lock holder starts either relay
+loop. If its process or database session dies, PostgreSQL releases the lock and
+the standby takes over; a live stop/takeover/failback drill verified this path.
 
 Money can only move through the escrow contract, driven by relayer-relayed,
 consensus-derived instructions. The frontend cannot spend on either chain;
@@ -103,9 +109,12 @@ Funding scanning is acknowledgment-aware. Each discovered event is atomically
 written to a durable pending queue together with the scan cursor before the
 cursor can advance. Pending events retry independently through GenLayer
 commitment, Base acknowledgement, and GenLayer activation, so one poison
-deposit cannot block later ranges. An ACCEPTED GenLayer transaction counts only
-when its leader execution receipt reports `SUCCESS`; a contract rollback stays
-queued. A funder can recover an unacknowledged mistaken deposit after seven
+deposit cannot block later ranges. A GenLayer transaction counts only after
+`FINALIZED` and successful execution. The current SDK's canonical
+`txExecutionResultName` is used when the network supplies it; StudioNet's
+detailed leader execution receipt is the compatibility fallback. A contract
+rollback or non-final decision stays queued. A funder can recover an
+unacknowledged mistaken deposit after seven
 days, and the relayer then voids any GenLayer commitment. Once Base
 acknowledgement wins, refund is impossible and activation remains durably
 retryable.

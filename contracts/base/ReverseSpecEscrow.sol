@@ -49,8 +49,8 @@ contract ReverseSpecEscrow {
     /// units (6 decimals). `bountyId` must match the id returned by
     /// `create_bounty` on the GenLayer contract — the off-chain relayer
     /// (backend/relayer/fundingRelay.js) reads this event and confirms the
-    /// deposit on GenLayer via `record_funding`, which is what actually
-    /// opens the bounty to submissions.
+    /// deposit on GenLayer via `record_funding`, acknowledges it here, then
+    /// opens the bounty via `activate_funding`.
     function fund(uint256 bountyId, uint256 amount) external nonReentrant {
         require(amount > 0 && !pools[bountyId].settled, "invalid funding");
         require(usdc.transferFrom(msg.sender, address(this), amount), "USDC transferFrom failed");

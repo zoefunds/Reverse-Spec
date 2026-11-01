@@ -66,8 +66,10 @@ Set `BASE_SEPOLIA_FUNDING_START_BLOCK` to the escrow deployment block. With no
 stored cursor the relayer replays from that block. Each scan atomically persists
 new pending events with its cursor; commitment, acknowledgement, and activation
 retry independently across restarts and cannot be skipped or stall discovery
-of later ranges. An ACCEPTED GenLayer transaction is complete only when its
-leader execution receipt reports `SUCCESS`.
+of later ranges. A GenLayer write is complete only after `FINALIZED` and
+successful contract execution. The SDK's canonical execution-result field is
+preferred; StudioNet's detailed leader receipt is the compatibility fallback
+while its RPC omits that field.
 
 ## Real payment-path regression
 
@@ -79,10 +81,12 @@ and makes the final USDC claim. It never directly calls `record_funding` or
 `mark_settled`. Inject the two E2E keys and `E2E_EVIDENCE_URL` from a secret
 manager.
 
-The full consensus run completed successfully on the immediately preceding
-contract pair. The current pair separately passed the faster real-value smoke
-below. Both sets of transaction hashes are clearly labeled in
-[`../remediation-milestone.md`](../remediation-milestone.md).
+Transaction-level evidence for completed deployment regressions is maintained
+in [`../remediation-milestone.md`](../remediation-milestone.md).
+If a runner is interrupted after settlement, recover Base-side `Funded`,
+`Settled`, and `Claimed` evidence with
+`E2E_EVIDENCE_BOUNTY_ID=<id> npm run e2e:evidence`; it respects the public
+RPC's 200-block log-query limit.
 
 For a faster real-value deployment check, run `npm run e2e:funding-smoke`. It
 uses 1 USDC by default and proves creation, automatic three-phase activation,
@@ -115,22 +119,32 @@ Operations:
 - Scale out: `fly scale count 2` (recommended for redundancy)
 - Backups: Fly Postgres daily snapshots (`fly postgres backup list`)
 
-## Relayer — Fly.io (24/7)
+## Relayer — Fly.io (active/passive 24/7)
 
-The current app is `reverse-spec-production-relayer`. It runs one background
-machine with the encrypted `relayer_state` volume mounted at `/data`; the
-durable cursor and pending-deposit queue live at
-`/data/relayer-state.json`.
+The primary app is `reverse-spec-production-relayer`; the hot standby is
+`reverse-spec-production-relayer-standby`. Each runs one background machine
+with its own encrypted `relayer_state` volume mounted at `/data`. Both use the
+same Postgres `DATABASE_URL` for a session advisory leadership lock. Only the
+lock holder starts relay loops; the other retries every 15 seconds.
 
 ```bash
 cd backend/relayer
 fly secrets set BASE_SEPOLIA_RELAYER_PRIVATE_KEY="0x..." \
   -a reverse-spec-production-relayer
+fly postgres attach reverse-spec-production-db \
+  -a reverse-spec-production-relayer
 fly deploy -a reverse-spec-production-relayer
 ```
 
+Provision the standby as a separate app with its own `relayer_state` volume,
+the same relayer key, and the exact same `DATABASE_URL` as the primary. Using a
+different database defeats advisory-lock coordination. A production drill on
+2026-11-01 verified primary stop → standby takeover → primary failback.
+
 The public Base RPC limits log queries to 200 blocks, so the relay scans
 199-block windows and replays forward from `BASE_SEPOLIA_FUNDING_START_BLOCK`.
+It waits `BASE_SEPOLIA_CONFIRMATIONS` blocks (five in production) before
+observing funding and again after acknowledgement or settlement transactions.
 Never remove or replace the state volume without first preserving its contents
 and confirming the deployment-block replay configuration.
 
@@ -151,8 +165,9 @@ After the first deploy, set the final Vercel domain into the backend's
 
 ## CI/CD
 
-`.github/workflows/ci.yml` runs contract lint, contract tests, backend
-tests, and the frontend build on every push. Deploys stay manual
+`.github/workflows/ci.yml` runs contract lint/direct tests, backend tests,
+relayer tests, Foundry escrow tests, and the frontend build on every push.
+`.github/workflows/secret-scan.yml` scans complete history. Deploys stay manual
 (`fly deploy` / `vercel --prod`) so a human gates production.
 
 ## Monitoring

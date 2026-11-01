@@ -8,12 +8,18 @@
     "start": "node index.js",
     "test": "node --test",
     "e2e:funding-smoke": "node e2e.funding-smoke.js",
+    "e2e:current": "node e2e.current-deployment.js",
     "e2e:payment": "node e2e.payment-path.js",
+    "e2e:evidence": "node e2e.payment-evidence.js",
     "deploy:genlayer": "node deploy-genlayer.js"
   },
   "dependencies": {
     "dotenv": "^16.6.1",
     "ethers": "^6.13.0",
-    "genlayer-js": "^0.16.0"
+    "genlayer-js": "^1.1.8",
+    "pg": "^8.16.3"
+  },
+  "overrides": {
+    "minimatch": "11.0.3"
   }
 }

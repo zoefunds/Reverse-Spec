@@ -95,6 +95,10 @@ Base `Funded` events and runs `record_funding` → Base acknowledgement →
   machines (`auto_stop=off`, `min_machines_running=1`, health-check
   restarts); the indexer uses a Postgres advisory-lock leader election so
   only one machine polls the chain RPC at a time, self-healing on failover.
+- **Relayer** ([backend/relayer/](backend/relayer/)) — active/passive Fly apps
+  share a PostgreSQL advisory leadership lease and keep independent encrypted
+  replay volumes. Only the lease holder submits cross-chain writes; the standby
+  takes over automatically if the leader or its database session disappears.
 - **Frontend** ([frontend/](frontend/)) — Landing, Explorer, Bounty detail +
   submit, Create (escrow funding), Dashboard, Rewards + claim + leaderboard,
   Profiles, How-it-works. Wallet auth: MetaMask / Rainbow / Zerion.
@@ -119,8 +123,8 @@ npm run dev   # http://localhost:3000
 ## Tests
 
 ```bash
-# contract lint + schema validation
-.venv/bin/genvm-lint check contracts/reverse_spec_bounties.py --json
+# contract lint (direct tests compile and execute the contract)
+.venv/bin/genvm-lint lint contracts/reverse_spec_bounties.py --json
 
 # contract direct tests (52) — covers commitment/activation/void funding,
 # submission-window/abandonment-recovery gating, and the tightened
@@ -130,7 +134,7 @@ npm run dev   # http://localhost:3000
 # backend API tests (13)
 (cd backend && ../.venv/bin/pytest tests/ -v)
 
-# relayer durability, receipt-execution, and refund-race tests (7)
+# relayer durability, finality, refund-race, and leadership tests (12)
 (cd backend/relayer && npm test)
 
 # Base escrow lifecycle tests (4)
@@ -142,6 +146,12 @@ npm run dev   # http://localhost:3000
 # full live payment path; requires secret-injected creator/solver keys,
 # test USDC and gas, and waits through the one-hour protocol floor
 (cd backend/relayer && npm run e2e:payment)
+
+# same full path with an ephemeral, automatically funded solver
+(cd backend/relayer && npm run e2e:current)
+
+# read-only, chunked Base event recovery for a completed bounty
+(cd backend/relayer && E2E_EVIDENCE_BOUNTY_ID=2 npm run e2e:evidence)
 
 # faster live funding/activation/refund smoke (real 1 USDC by default)
 (cd backend/relayer && npm run e2e:funding-smoke)

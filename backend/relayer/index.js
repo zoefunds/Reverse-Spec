@@ -1,6 +1,7 @@
 import { config, assertConfig } from "./config.js";
 import { startFundingRelay, fundingRelayState } from "./fundingRelay.js";
 import { startPayoutRelay, payoutRelayState } from "./payoutRelay.js";
+import { runAsLeader } from "./leadership.js";
 
 const logger = {
   info: (msg) => console.log(`[${new Date().toISOString()}] INFO  ${msg}`),
@@ -14,8 +15,10 @@ logger.info(
     `escrow=${config.baseSepolia.escrowAddress} network=${config.genlayerNetwork}`,
 );
 
-startFundingRelay(logger);
-startPayoutRelay(logger);
+await runAsLeader(logger, () => {
+  startFundingRelay(logger);
+  startPayoutRelay(logger);
+});
 
 process.on("SIGINT", () => {
   logger.info(
