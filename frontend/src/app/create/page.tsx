@@ -4,9 +4,9 @@
  * Create bounty — two-step flow now that funding lives on Base Sepolia:
  *   1) create_bounty on GenLayer (no value attached; leaves the bounty
  *      PENDING_FUNDING) with a submission window.
- *   2) approve + fund USDC on the Base Sepolia escrow, then poll
- *      get_bounty until the relayer confirms the deposit and flips the
- *      bounty to OPEN.
+ *   2) approve + fund USDC on Base, then poll while the relayer records a
+ *      non-active FUNDING_COMMITTED state, acknowledges Base, and only then
+ *      activates the bounty as OPEN.
  */
 
 import { useEffect, useRef, useState } from "react";

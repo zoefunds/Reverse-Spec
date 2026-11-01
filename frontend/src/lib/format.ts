@@ -106,6 +106,8 @@ export const TIER_LABEL: Record<string, string> = {
 };
 
 export const STATUS_TONE: Record<string, string> = {
+  PENDING_FUNDING: "text-ink-soft border-line bg-surface-high",
+  FUNDING_COMMITTED: "text-warning border-warning/40 bg-warning/10",
   OPEN: "text-tertiary border-tertiary/40 bg-tertiary/10",
   EVALUATING: "text-warning border-warning/40 bg-warning/10",
   RESOLVED: "text-success border-success/40 bg-success/10",

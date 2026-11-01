@@ -30,6 +30,7 @@ BOUNTY_RESOLVED: int = 2      # winner selected (payout instruction available)
 BOUNTY_UNRESOLVED: int = 3    # evaluated, nothing met the bar; escrow reclaimable
 BOUNTY_CANCELLED: int = 4     # cancelled before any submission; escrow refunded
 BOUNTY_RECLAIMED: int = 5     # unresolved and creator has reclaimed escrow
+BOUNTY_FUNDING_COMMITTED: int = 7  # GenLayer recorded; awaiting Base ack
 
 BOUNTY_STATUS_NAMES: dict = {
     BOUNTY_PENDING_FUNDING: "PENDING_FUNDING",
@@ -39,6 +40,7 @@ BOUNTY_STATUS_NAMES: dict = {
     BOUNTY_UNRESOLVED: "UNRESOLVED",
     BOUNTY_CANCELLED: "CANCELLED",
     BOUNTY_RECLAIMED: "RECLAIMED",
+    BOUNTY_FUNDING_COMMITTED: "FUNDING_COMMITTED",
 }
 
 # --- Terminal statuses whose payout instructions may be relayed to Base -----
@@ -258,7 +260,8 @@ class AuditEntry:
 #     who gets what, in USDC base units, and exposes that decision via
 #     `get_base_payouts`. It never touches a private key or a transfer.
 #   - A single trusted relayer address bridges the two directions:
-#     `record_funding` (Base deposit -> this contract, confirms escrow)
+#     `record_funding` (records a non-active commitment),
+#     `activate_funding` (after Base acknowledgment, opens the bounty),
 #     and `mark_settled` (this contract's payout instruction -> Base
 #     `settle()` call, confirms it was relayed). Both are idempotent on
 #     the Base transaction hash so a retried relay can never double-count.
@@ -282,8 +285,11 @@ class ReverseSpecBounties(gl.Contract):
         create_bounty        create a PENDING_FUNDING bounty shell (no
                              value attached — funding happens in USDC on
                              the Base Sepolia escrow)
-        record_funding       relayer-only — confirms a Base Sepolia USDC
-                             deposit and opens the bounty
+        record_funding       relayer-only — records a non-active Base deposit
+                             commitment
+        activate_funding     relayer-only — opens only after Base makes the
+                             deposit non-refundable
+        void_funding         relayer-only — clears a refunded commitment
         cancel_bounty        creator, only while zero live submissions
         close_submissions    creator, or any solver with a live
                              submission (abandonment recovery), and only
@@ -313,6 +319,8 @@ class ReverseSpecBounties(gl.Contract):
     audit_seq: u32
     applied_base_tx: TreeMap[str, bool]
     creation_refs: TreeMap[str, u32]
+    pending_funding_tx: TreeMap[u32, str]
+    pending_funding_amount: TreeMap[u32, u256]
 
     bounties: TreeMap[u32, Bounty]
     submissions: TreeMap[u32, Submission]
@@ -825,8 +833,8 @@ Respond with ONLY a JSON object, no markdown, in exactly this shape:
         No value is attached here — GenLayer cannot custody an asset that
         lives on another chain. The creator funds the bounty by calling
         `fund(bounty_id, amount)` on the Base Sepolia escrow contract; the
-        relayer then confirms that deposit via `record_funding`, which is
-        what actually opens the bounty to submissions.
+        relayer records it via `record_funding`, acknowledges it on Base,
+        then calls `activate_funding`, which opens submissions.
 
         Args:
             title: short bounty headline.
@@ -912,20 +920,18 @@ Respond with ONLY a JSON object, no markdown, in exactly this shape:
     @gl.public.write
     def record_funding(self, bounty_id: u32, funder: str, amount: u256,
                        base_tx_hash: str) -> None:
-        """Relayer-only: confirm a USDC deposit made on the Base Sepolia
-        escrow contract and open the bounty once the minimum is met.
+        """Relayer-only phase 1: record a Base USDC deposit commitment.
 
-        Idempotent on `base_tx_hash` so a retried/duplicated relay can
-        never double-credit a bounty.
+        This deliberately does NOT open the bounty. The relayer must first
+        verify this transaction executed successfully, acknowledge the deposit
+        on Base (making it non-refundable), then call `activate_funding`.
         """
         self._only_relayer()
         bounty = self._get_bounty_or_fail(int(bounty_id))
         tx_key = base_tx_hash.strip().lower()
         self._require(bool(tx_key), "base_tx_hash is required")
         if self.applied_base_tx.get(tx_key):
-            return  # idempotent no-op: already applied — checked BEFORE
-                    # the status guard so a retried relay after the bounty
-                    # already opened doesn't get misreported as an error.
+            return
         self._require(int(bounty.status) == BOUNTY_PENDING_FUNDING,
                       "bounty is not awaiting funding")
         self._require(funder.strip().lower() == str(bounty.creator).lower(),
@@ -934,6 +940,30 @@ Respond with ONLY a JSON object, no markdown, in exactly this shape:
         self._require(deposited >= MIN_BOUNTY_ESCROW,
                       f"deposit below minimum ({MIN_BOUNTY_ESCROW} base units)")
         self.applied_base_tx[tx_key] = True
+        self.pending_funding_tx[bounty_id] = tx_key
+        self.pending_funding_amount[bounty_id] = u256(deposited)
+        bounty.status = u8(BOUNTY_FUNDING_COMMITTED)
+        self._audit("RECORD_FUNDING_COMMITMENT",
+                    f"id={int(bounty_id)} amount={deposited} "
+                    f"funder={funder} base_tx={tx_key}")
+
+    @gl.public.write
+    def activate_funding(self, bounty_id: u32, base_tx_hash: str) -> None:
+        """Relayer-only phase 2: open after Base acknowledged the deposit."""
+        self._only_relayer()
+        bounty = self._get_bounty_or_fail(int(bounty_id))
+        tx_key = base_tx_hash.strip().lower()
+        if int(bounty.status) == BOUNTY_OPEN:
+            self._require(self.pending_funding_tx.get(bounty_id, "") == tx_key,
+                          "funding transaction mismatch")
+            return
+        self._require(int(bounty.status) == BOUNTY_FUNDING_COMMITTED,
+                      "funding is not committed")
+        self._require(self.pending_funding_tx.get(bounty_id, "") == tx_key,
+                      "funding transaction mismatch")
+        deposited = int(self.pending_funding_amount.get(bounty_id, u256(0)))
+        self._require(deposited >= MIN_BOUNTY_ESCROW,
+                      "committed funding amount is invalid")
         now = _now_ts()
         bounty.reward_escrow = u256(deposited)
         bounty.initial_escrow = u256(deposited)
@@ -941,9 +971,34 @@ Respond with ONLY a JSON object, no markdown, in exactly this shape:
         bounty.submission_deadline = u256(now + int(bounty.submission_window_secs))
         bounty.status = u8(BOUNTY_OPEN)
         self.total_open_escrow = u256(int(self.total_open_escrow) + deposited)
-        self._audit("RECORD_FUNDING",
-                    f"id={int(bounty_id)} amount={deposited} "
-                    f"funder={funder} base_tx={tx_key}")
+        self._audit("ACTIVATE_FUNDING",
+                    f"id={int(bounty_id)} amount={deposited} base_tx={tx_key}")
+
+    @gl.public.write
+    def void_funding(self, bounty_id: u32, base_tx_hash: str) -> None:
+        """Relayer-only: clear a commitment after Base refunded the deposit."""
+        self._only_relayer()
+        bounty = self._get_bounty_or_fail(int(bounty_id))
+        tx_key = base_tx_hash.strip().lower()
+        if int(bounty.status) != BOUNTY_FUNDING_COMMITTED:
+            return
+        self._require(self.pending_funding_tx.get(bounty_id, "") == tx_key,
+                      "funding transaction mismatch")
+        self.pending_funding_tx[bounty_id] = ""
+        self.pending_funding_amount[bounty_id] = u256(0)
+        self.applied_base_tx[tx_key] = False
+        bounty.status = u8(BOUNTY_PENDING_FUNDING)
+        self._audit("VOID_FUNDING", f"id={int(bounty_id)} base_tx={tx_key}")
+
+    @gl.public.view
+    def get_pending_funding(self, bounty_id: u32) -> dict:
+        """Return the two-phase funding commitment for relay reconciliation."""
+        bounty = self._get_bounty_or_fail(int(bounty_id))
+        return {
+            "status": BOUNTY_STATUS_NAMES.get(int(bounty.status), "UNKNOWN"),
+            "base_tx_hash": self.pending_funding_tx.get(bounty_id, ""),
+            "amount": str(int(self.pending_funding_amount.get(bounty_id, u256(0)))),
+        }
 
     @gl.public.write
     def cancel_bounty(self, bounty_id: u32) -> None:
@@ -998,7 +1053,7 @@ Respond with ONLY a JSON object, no markdown, in exactly this shape:
         that, a solver (or an impatient creator) could close the window
         the instant a single submission lands, shutting out every other
         prospective solver before they had a fair chance to compete. The
-        deadline is fixed at funding time (`record_funding`), so no caller
+        deadline is fixed at activation time (`activate_funding`), so no caller
         — including the one triggering the close — controls it.
         """
         bounty = self._get_bounty_or_fail(int(bounty_id))

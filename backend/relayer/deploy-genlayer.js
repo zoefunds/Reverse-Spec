@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { createAccount, createClient } from "genlayer-js";
 import { studionet } from "genlayer-js/chains";
 import { TransactionStatus } from "genlayer-js/types";
+import { assertSuccessfulExecution } from "./genlayer.js";
 
 const suppliedKey = process.env.GENLAYER_DEPLOYER_PRIVATE_KEY;
 if (!suppliedKey) throw new Error("GENLAYER_DEPLOYER_PRIVATE_KEY is required");
@@ -21,7 +22,9 @@ const receipt = await client.waitForTransactionReceipt({
   status: TransactionStatus.ACCEPTED,
   interval: 5000,
   retries: 180,
+  fullTransaction: true,
 });
+assertSuccessfulExecution(receipt, "deployContract");
 console.log(JSON.stringify({
   hash: receipt.hash ?? receipt.txId ?? hash,
   status: receipt.statusName ?? receipt.status,

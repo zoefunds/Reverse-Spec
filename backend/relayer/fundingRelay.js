@@ -6,10 +6,10 @@
  *
  * Every deposit is independently observed on-chain (a confirmed `Funded`
  * event) before being relayed — nothing here trusts a client-supplied
- * amount. `record_funding` is idempotent on `base_tx_hash`, so a retried
- * relay (crash, RPC hiccup) can never double-credit a bounty; that
- * idempotency lives on GenLayer, not in this process's memory, so this
- * relay is safe to restart at any point.
+ * amount. Funding is a crash-safe three-step protocol: record a non-active
+ * GenLayer commitment, acknowledge Base (making the deposit non-refundable),
+ * then activate the bounty. Every write is idempotent and remains queued until
+ * all three verified-success receipts complete.
  */
 import { Contract, JsonRpcProvider, Wallet } from "ethers";
 import { config } from "./config.js";
@@ -94,20 +94,26 @@ export async function scanAndApply(logger, deps = {}) {
     try {
       if (typeof escrow.deposits === "function") {
         const onchain = await escrow.deposits(depositId);
-        if (onchain.acknowledged ?? onchain[4]) {
-          delete pending[key];
-          logger.info(`funding already acknowledged on Base: deposit=${depositId}`);
-          continue;
-        }
         if (onchain.refunded ?? onchain[5]) {
+          await applyFunding(logger, "void_funding", [bountyId, baseTxHash]);
           delete pending[key];
-          logger.warn(`dropping refunded unacknowledged deposit=${depositId}`);
+          logger.warn(`voided refunded funding commitment: deposit=${depositId}`);
           continue;
         }
       }
       await applyFunding(logger, "record_funding", [bountyId, funder, amount, baseTxHash]);
-      const ackTx = await escrow.acknowledgeDeposit(depositId);
-      await ackTx.wait();
+      const onchain = typeof escrow.deposits === "function"
+        ? await escrow.deposits(depositId)
+        : null;
+      const alreadyAcknowledged = Boolean(onchain && (onchain.acknowledged ?? onchain[4]));
+      if (!alreadyAcknowledged) {
+        const ackTx = await escrow.acknowledgeDeposit(depositId);
+        const ackReceipt = await ackTx.wait();
+        if (ackReceipt?.status != null && Number(ackReceipt.status) !== 1) {
+          throw new Error(`Base acknowledgement reverted for deposit=${depositId}`);
+        }
+      }
+      await applyFunding(logger, "activate_funding", [bountyId, baseTxHash]);
       fundingRelayState.applied += 1;
       delete pending[key];
       logger.info(`funding relayed: bounty=${bountyId} amount=${amount} tx=${baseTxHash}`);

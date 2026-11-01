@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { scanAndApply } from "./fundingRelay.js";
 import { normalizePrivateKey } from "./config.js";
-import { plain } from "./genlayer.js";
+import { assertSuccessfulExecution, plain, writeAndWait } from "./genlayer.js";
 
 const logger = { info() {}, warn() {}, error() {} };
 
@@ -23,7 +23,39 @@ test("normalizes nested GenLayer map results for payout discovery", () => {
   });
 });
 
-test("durably queues and retries an interrupted GenLayer acknowledgement", async () => {
+test("ACCEPTED GenLayer transaction with failed execution is rejected", async () => {
+  let hash = 0;
+  const client = {
+    async writeContract() { hash += 1; return `0x${hash}`; },
+    async waitForTransactionReceipt() {
+      return {
+        statusName: "ACCEPTED",
+        consensus_data: { leader_receipt: [{
+          mode: "leader",
+          execution_result: "ERROR",
+          genvm_result: { raw_error: { causes: ["UserError"] }, error_code: "USER_ERROR" },
+          result: { status: "rollback" },
+        }] },
+      };
+    },
+  };
+  await assert.rejects(
+    writeAndWait(logger, "record_funding", [1], { client }),
+    /accepted but contract execution failed/,
+  );
+});
+
+test("successful leader execution is required after ACCEPTED", () => {
+  assert.doesNotThrow(() => assertSuccessfulExecution({
+    consensus_data: { leader_receipt: [{
+      mode: "leader", execution_result: "SUCCESS",
+      genvm_result: { raw_error: null, error_code: null },
+      result: { status: "return" },
+    }] },
+  }, "record_funding"));
+});
+
+test("failed GenLayer execution stays queued and never acknowledges Base", async () => {
   const state = {};
   const event = {
     transactionHash: "0xABC",
@@ -44,7 +76,9 @@ test("durably queues and retries an interrupted GenLayer acknowledgement", async
     updateSyncState: (mutator) => mutator(state),
     async writeAndWait() {
       attempts += 1;
-      if (attempts === 1) throw new Error("simulated GenLayer interruption");
+      if (attempts === 1) {
+        throw new Error("record_funding accepted but contract execution failed");
+      }
     },
   };
 
@@ -61,8 +95,57 @@ test("durably queues and retries an interrupted GenLayer acknowledgement", async
   assert.equal(second.allAcknowledged, true);
   assert.equal(state["fundingRelay:lastScannedBlock"], "95");
   assert.deepEqual(state["fundingRelay:pendingDeposits"], {});
-  assert.equal(attempts, 2);
+  assert.equal(attempts, 3, "record retry and activation both execute successfully");
   assert.equal(baseAcknowledgements, 1);
+});
+
+test("seven-day Base refund cannot leave an active GenLayer bounty", async () => {
+  const state = {};
+  let refunded = false;
+  let ackAttempts = 0;
+  const writes = [];
+  const event = {
+    transactionHash: "0xF00D",
+    args: {
+      bountyId: 9n,
+      funder: "0x0000000000000000000000000000000000000009",
+      amount: 5000000n,
+      depositId: 4n,
+    },
+  };
+  const deps = {
+    head: 100,
+    events: [event],
+    escrow: {
+      async deposits() {
+        return { acknowledged: false, refunded };
+      },
+      async acknowledgeDeposit() {
+        ackAttempts += 1;
+        throw new Error("Base relayer outage");
+      },
+    },
+    getSyncState: (key) => state[key] ?? null,
+    updateSyncState: (mutator) => mutator(state),
+    async writeAndWait(_logger, method) {
+      writes.push(method);
+    },
+  };
+
+  const beforeRefund = await scanAndApply(logger, deps);
+  assert.equal(beforeRefund.pending, 1);
+  assert.deepEqual(writes, ["record_funding"]);
+  assert.equal(ackAttempts, 1);
+  assert.ok(!writes.includes("activate_funding"),
+    "a recorded commitment is not an active bounty before Base acknowledgement");
+
+  // Models refundUnacknowledged succeeding after REFUND_DELAY while the
+  // relayer was unavailable. Reconciliation voids the non-active commitment.
+  refunded = true;
+  const afterRefund = await scanAndApply(logger, deps);
+  assert.equal(afterRefund.pending, 0);
+  assert.deepEqual(writes, ["record_funding", "void_funding"]);
+  assert.ok(!writes.includes("activate_funding"));
 });
 
 test("a poison deposit does not prevent discovery and application of later ranges", async () => {

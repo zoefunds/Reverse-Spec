@@ -31,20 +31,41 @@ export function getWriteClient(logger) {
   return getSharedClient(logger);
 }
 
-export async function writeAndWait(logger, functionName, args) {
-  const client = getWriteClient(logger);
+export function assertSuccessfulExecution(receipt, functionName = "transaction") {
+  const normalized = plain(receipt);
+  const leaders = (normalized.consensus_data?.leader_receipt ?? [])
+    .filter((item) => item?.mode === "leader");
+  if (leaders.length === 0) {
+    throw new Error(`${functionName} accepted without a leader execution receipt`);
+  }
+  const execution = leaders.at(-1);
+  const genvm = execution.genvm_result ?? {};
+  const returned = execution.result?.status;
+  if (execution.execution_result !== "SUCCESS" || genvm.raw_error != null ||
+      genvm.error_code != null || (returned != null && returned !== "return")) {
+    const detail = genvm.error_description ?? genvm.error_code ??
+      execution.execution_result ?? "unknown execution failure";
+    throw new Error(`${functionName} accepted but contract execution failed: ${detail}`);
+  }
+  return normalized;
+}
+
+export async function writeAndWait(logger, functionName, args, deps = {}) {
+  const client = deps.client ?? getWriteClient(logger);
   const hash = await client.writeContract({
     address: config.genlayerContractAddress,
     functionName,
     args,
     value: 0n,
   });
-  await client.waitForTransactionReceipt({
+  const receipt = await client.waitForTransactionReceipt({
     hash,
     status: "ACCEPTED",
     interval: 3000,
     retries: 60,
+    fullTransaction: true,
   });
+  assertSuccessfulExecution(receipt, functionName);
   return hash;
 }
 

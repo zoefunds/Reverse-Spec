@@ -54,6 +54,22 @@ contract ReverseSpecEscrowTest {
         require(!ok, "unacknowledged funds were allocatable");
     }
 
+    function testPendingAcknowledgmentRemainsRefundableAfterSevenDays() public {
+        escrow.fund(11, 5 * UNIT);
+        (, address funder, uint256 amount, uint64 refundableAt, bool acknowledged, bool refunded) = escrow.deposits(1);
+        require(funder == address(this) && amount == 5 * UNIT, "bad deposit record");
+        require(!acknowledged && !refunded, "unexpected initial flags");
+
+        vm.warp(uint256(refundableAt));
+        uint256 before = usdc.balanceOf(address(this));
+        escrow.refundUnacknowledged(1);
+        require(usdc.balanceOf(address(this)) - before == 5 * UNIT, "refund failed");
+        (,, uint256 afterAmount,, bool afterAck, bool afterRefund) = escrow.deposits(1);
+        require(afterAmount == 5 * UNIT && !afterAck && afterRefund, "bad final flags");
+        (uint256 deposited,,) = escrow.pools(11);
+        require(deposited == 0, "refunded collateral still counted");
+    }
+
     function testAcknowledgedFundsSettleAndClaim() public {
         escrow.fund(1, 5 * UNIT);
         escrow.acknowledgeDeposit(1);

@@ -13,6 +13,7 @@ import { createAccount, createClient } from "genlayer-js";
 import { studionet } from "genlayer-js/chains";
 import { TransactionStatus } from "genlayer-js/types";
 import { config } from "./config.js";
+import { assertSuccessfulExecution } from "./genlayer.js";
 
 const creatorKey = process.env.E2E_CREATOR_PRIVATE_KEY;
 const solverKey = process.env.E2E_SOLVER_PRIVATE_KEY;
@@ -40,7 +41,11 @@ function glClient(key) {
 }
 async function write(client, functionName, args) {
   const hash = await client.writeContract({ address: config.genlayerContractAddress, functionName, args, value: 0n });
-  await client.waitForTransactionReceipt({ hash, status: TransactionStatus.ACCEPTED, interval: 3000, retries: 120 });
+  const receipt = await client.waitForTransactionReceipt({
+    hash, status: TransactionStatus.ACCEPTED, interval: 3000, retries: 120,
+    fullTransaction: true,
+  });
+  assertSuccessfulExecution(receipt, functionName);
   return hash;
 }
 async function read(client, functionName, args = []) {

@@ -124,13 +124,15 @@ def _create(vm, contract, creator=CREATOR, window=DEFAULT_WINDOW):
 def _fund_bounty(vm, contract, creator=CREATOR, escrow=ESCROW,
                  window=DEFAULT_WINDOW, tx_hash=None):
     """Create + relayer-confirm funding, matching the real two-step flow:
-    create_bounty (GenLayer) -> fund() on Base Sepolia -> record_funding
-    (relayer, once the Base deposit is confirmed)."""
+    create_bounty -> Base fund -> record commitment -> Base acknowledge ->
+    activate_funding. The direct test models both successful relay writes."""
     bounty_id = _create(vm, contract, creator=creator, window=window)
     vm.sender = OWNER  # the relayer
+    base_tx = tx_hash or f"0xfund{int(bounty_id):04x}"
     contract.record_funding(
         bounty_id, addr_hex(creator), escrow,
-        tx_hash or f"0xfund{int(bounty_id):04x}")
+        base_tx)
+    contract.activate_funding(bounty_id, base_tx)
     return bounty_id
 
 
@@ -165,8 +167,20 @@ class TestCreateAndFund:
         assert data["status"] == "PENDING_FUNDING"
         assert data["reward_escrow"] == "0"
 
-    def test_record_funding_opens_bounty(self, vm, contract):
-        bounty_id = _fund_bounty(vm, contract)
+    def test_record_funding_requires_base_ack_activation_to_open(self, vm, contract):
+        bounty_id = _create(vm, contract)
+        vm.sender = OWNER
+        contract.record_funding(bounty_id, addr_hex(CREATOR), ESCROW, "0xphase")
+        committed = contract.get_bounty(bounty_id)
+        assert committed["status"] == "FUNDING_COMMITTED"
+        assert committed["reward_escrow"] == "0"
+        assert contract.get_pending_funding(bounty_id) == {
+            "status": "FUNDING_COMMITTED",
+            "base_tx_hash": "0xphase",
+            "amount": str(ESCROW),
+        }
+
+        contract.activate_funding(bounty_id, "0xphase")
         data = contract.get_bounty(bounty_id)
         assert data["status"] == "OPEN"
         assert data["reward_escrow"] == str(ESCROW)
@@ -203,7 +217,21 @@ class TestCreateAndFund:
         # Second relay with the same base_tx_hash must be a silent no-op,
         # not a double-credit.
         contract.record_funding(bounty_id, addr_hex(CREATOR), ESCROW, "0xdup")
+        assert contract.get_bounty(bounty_id)["status"] == "FUNDING_COMMITTED"
+        contract.activate_funding(bounty_id, "0xdup")
+        contract.activate_funding(bounty_id, "0xdup")
         assert contract.get_bounty(bounty_id)["reward_escrow"] == str(ESCROW)
+
+    def test_refunded_commitment_can_be_voided_without_opening(self, vm, contract):
+        bounty_id = _create(vm, contract)
+        vm.sender = OWNER
+        contract.record_funding(bounty_id, addr_hex(CREATOR), ESCROW, "0xrefund")
+        # Models a Base refund after the seven-day delay: because activation
+        # never occurred, no solver could have submitted against this bounty.
+        contract.void_funding(bounty_id, "0xrefund")
+        assert contract.get_bounty(bounty_id)["status"] == "PENDING_FUNDING"
+        assert contract.get_bounty(bounty_id)["reward_escrow"] == "0"
+        assert contract.get_pending_funding(bounty_id)["amount"] == "0"
 
     def test_record_funding_rejects_dust(self, vm, contract):
         bounty_id = _create(vm, contract)
@@ -607,8 +635,9 @@ class TestViews:
         entries = contract.get_audit_page(0, 10)
         actions = [e["action"] for e in entries]
         assert actions[0] == "SUBMIT_SOLUTION"
-        assert actions[1] == "RECORD_FUNDING"
-        assert actions[2] == "CREATE_BOUNTY"
+        assert actions[1] == "ACTIVATE_FUNDING"
+        assert actions[2] == "RECORD_FUNDING_COMMITMENT"
+        assert actions[3] == "CREATE_BOUNTY"
 
 
 # ---------------------------------------------------------------------------
