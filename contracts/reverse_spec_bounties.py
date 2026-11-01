@@ -312,6 +312,7 @@ class ReverseSpecBounties(gl.Contract):
     submission_seq: u32
     audit_seq: u32
     applied_base_tx: TreeMap[str, bool]
+    creation_refs: TreeMap[str, u32]
 
     bounties: TreeMap[u32, Bounty]
     submissions: TreeMap[u32, Submission]
@@ -712,10 +713,9 @@ Respond with ONLY a JSON object, no markdown, in exactly this shape:
           2. Validator re-derives its own verdict (own fetch, own LLM call).
           3. Accept when tiers agree within TIER_TOLERANCE AND banded
              composite scores agree within SCORE_TOLERANCE.
-          4. If the validator's own derivation fails infrastructurally,
-             accept a structurally valid leader rather than forcing
-             rotation — availability of a reasonable verdict beats
-             perfection, and structural bounds still hold.
+          4. Any failure of the validator's independent evidence fetch or
+             AI execution rejects the leader result. Financial decisions
+             require completed independent verification.
         """
         bounty_title = bounty.title
         spec_text = bounty.spec_text
@@ -786,10 +786,7 @@ Respond with ONLY a JSON object, no markdown, in exactly this shape:
             try:
                 mine = derive()
             except Exception:  # noqa: BLE001
-                # Infrastructure failed on THIS validator only. The leader
-                # result already passed structural checks; accepting keeps
-                # consensus alive instead of rotating leaders on flaky I/O.
-                return True
+                return False
             my_composite = contract._composite(
                 mine["spec_compliance"], mine["problem_depth"],
                 mine["superiority"], mine["evidence_quality"])
@@ -821,7 +818,8 @@ Respond with ONLY a JSON object, no markdown, in exactly this shape:
     def create_bounty(self, title: str, spec_text: str,
                       true_problem_text: str, category: str, tags_csv: str,
                       created_at_note: str, deadline_note: str,
-                      submission_window_secs: u256) -> u32:
+                      submission_window_secs: u256,
+                      creation_ref: str) -> u32:
         """Create a bounty shell awaiting USDC funding on Base Sepolia.
 
         No value is attached here — GenLayer cannot custody an asset that
@@ -848,6 +846,11 @@ Respond with ONLY a JSON object, no markdown, in exactly this shape:
             The new bounty id.
         """
         window = int(submission_window_secs)
+        ref = creation_ref.strip().lower()
+        self._require(8 <= len(ref) <= 96,
+                      "creation_ref must be 8-96 characters")
+        self._require(int(self.creation_refs.get(ref, u32(0))) == 0,
+                      "creation_ref already used")
         self._require(
             MIN_SUBMISSION_WINDOW_SECS <= window <= MAX_SUBMISSION_WINDOW_SECS,
             f"submission_window_secs must be between "
@@ -895,9 +898,16 @@ Respond with ONLY a JSON object, no markdown, in exactly this shape:
             resolution_summary="",
         )
         self.bounties[bounty_id] = bounty
+        self.creation_refs[ref] = bounty_id
         self._audit("CREATE_BOUNTY",
-                    f"id={int(bounty_id)} window={window} title={title_n[:60]}")
+                    f"id={int(bounty_id)} ref={ref[:48]} window={window} "
+                    f"title={title_n[:60]}")
         return bounty_id
+
+    @gl.public.view
+    def get_bounty_id_by_creation_ref(self, creation_ref: str) -> u32:
+        """Resolve the id attributable to one create transaction."""
+        return self.creation_refs.get(creation_ref.strip().lower(), u32(0))
 
     @gl.public.write
     def record_funding(self, bounty_id: u32, funder: str, amount: u256,
@@ -918,10 +928,12 @@ Respond with ONLY a JSON object, no markdown, in exactly this shape:
                     # already opened doesn't get misreported as an error.
         self._require(int(bounty.status) == BOUNTY_PENDING_FUNDING,
                       "bounty is not awaiting funding")
-        self.applied_base_tx[tx_key] = True
+        self._require(funder.strip().lower() == str(bounty.creator).lower(),
+                      "deposit funder must be the bounty creator")
         deposited = int(amount)
         self._require(deposited >= MIN_BOUNTY_ESCROW,
                       f"deposit below minimum ({MIN_BOUNTY_ESCROW} base units)")
+        self.applied_base_tx[tx_key] = True
         now = _now_ts()
         bounty.reward_escrow = u256(deposited)
         bounty.initial_escrow = u256(deposited)

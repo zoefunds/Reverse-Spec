@@ -117,6 +117,7 @@ def _create(vm, contract, creator=CREATOR, window=DEFAULT_WINDOW):
         "2026-07-17",
         "2026-08-17",
         window,
+        f"test-ref-{addr_hex(creator)}-{int(window)}-{int(contract.get_platform_stats()['bounties_total'])}",
     )
 
 
@@ -181,6 +182,20 @@ class TestCreateAndFund:
             contract.record_funding(bounty_id, addr_hex(CREATOR), ESCROW,
                                     "0xnotrelayer")
 
+    def test_creation_reference_resolves_only_its_own_bounty(self, vm, contract):
+        bounty_id = _create(vm, contract)
+        ref = f"test-ref-{addr_hex(CREATOR)}-{DEFAULT_WINDOW}-0"
+        assert contract.get_bounty_id_by_creation_ref(ref) == bounty_id
+        assert contract.get_bounty_id_by_creation_ref("missing-ref") == 0
+
+    def test_record_funding_rejects_non_creator_deposit(self, vm, contract):
+        bounty_id = _create(vm, contract)
+        vm.sender = OWNER
+        with pytest.raises(Exception, match="EXPECTED.*funder.*creator"):
+            contract.record_funding(
+                bounty_id, addr_hex(SOLVER_A), ESCROW, "0xwrong-funder")
+        assert contract.get_bounty(bounty_id)["status"] == "PENDING_FUNDING"
+
     def test_record_funding_idempotent_on_tx_hash(self, vm, contract):
         bounty_id = _create(vm, contract)
         vm.sender = OWNER
@@ -200,19 +215,19 @@ class TestCreateAndFund:
         vm.sender = CREATOR
         with pytest.raises(Exception, match="EXPECTED.*spec_text"):
             contract.create_bounty("A valid bounty title", "too short", "",
-                                   "UX", "", "", "", DEFAULT_WINDOW)
+                                   "UX", "", "", "", DEFAULT_WINDOW, "short-spec-ref")
 
     def test_tag_cap_enforced(self, vm, contract):
         vm.sender = CREATOR
         with pytest.raises(Exception, match="EXPECTED.*tags"):
             contract.create_bounty("A valid bounty title", SPEC, "", "UX",
-                                   "a,b,c,d,e,f,g", "", "", DEFAULT_WINDOW)
+                                   "a,b,c,d,e,f,g", "", "", DEFAULT_WINDOW, "tag-cap-ref")
 
     def test_submission_window_bounds_enforced(self, vm, contract):
         vm.sender = CREATOR
         with pytest.raises(Exception, match="EXPECTED.*submission_window_secs"):
             contract.create_bounty("A valid bounty title", SPEC, "", "UX",
-                                   "", "", "", 10)  # far below the 1h floor
+                                   "", "", "", 10, "window-ref")  # far below the 1h floor
 
 
 # ---------------------------------------------------------------------------
@@ -416,6 +431,15 @@ class TestEvaluation:
         # evidence availability, same scores -> must accept.
         accepted = vm.run_validator()
         assert accepted is True
+
+    def test_validator_rejects_when_independent_ai_execution_fails(self, vm, contract):
+        bounty_id = _fund_bounty(vm, contract)
+        sub_id = _submit(vm, contract, bounty_id)
+        _close_after_window(vm, contract, bounty_id)
+        _mock_evaluation(vm, verdict_json=GOOD_VERDICT)
+        contract.evaluate_submission(sub_id)
+        vm.clear_mocks()
+        assert vm.run_validator() is False
 
     def test_tightened_score_tolerance_rejects_prior_borderline_case(
             self, vm, contract):

@@ -80,14 +80,22 @@ The evaluation runs as a custom leader/validator nondet block:
 - Validators must also match the leader's `evidence_fetch_ok` exactly (both
   fetched successfully, or both failed) — a payout-driving verdict can't be
   accepted when one side has an artifact to judge and the other doesn't.
-- A validator whose own web/LLM call fails infrastructurally accepts a
-  structurally-valid leader instead of forcing rotation.
+- A validator whose independent web/LLM execution fails rejects the leader;
+  financially consequential verdicts require completed independent verification.
 - Scores are clamped and banded (width 5) before comparison so sampling
   noise cannot flip votes.
 - At payout time, `finalize_bounty` additionally requires
   `evidence_fetch_ok == True` on the stored evaluation before a submission
   can become winner/runner-up — an unverifiable claim can be ranked/stored
   but never actually paid.
+
+Funding scanning is acknowledgment-aware. Each discovered event is atomically
+written to a durable pending queue together with the scan cursor before the
+cursor can advance. Pending events retry independently until GenLayer recording
+and Base acknowledgement both succeed, so one poison deposit cannot block later
+ranges. A funder can recover an
+unacknowledged mistaken deposit after the seven-day safety delay, while an
+acknowledged deposit can no longer be refunded.
 
 ## Auth flow
 

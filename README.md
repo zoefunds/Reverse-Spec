@@ -14,7 +14,7 @@ AI-validator consensus, not by any company or server.
 |---|---|
 | Frontend | https://reverse-spec.vercel.app |
 | Backend API | https://reverse-spec-api.fly.dev (`/healthz` for status) |
-| Contract (StudioNet) | `0x1DD671F0b8Be9e6fB7e7F2078261e1B840AF4439` |
+| Contract (StudioNet) | `0x185cE8fff49fe93f57635aB03FC19B9e5d3D04e6` |
 | Repo | https://github.com/zoefunds/Reverse-Spec |
 
 Proven live (v0.x, native-GEN era), not simulated: 4 funded bounties
@@ -30,7 +30,7 @@ multi-machine HA).
 **v1 milestone (current):** the contract was rewritten to a split-custody
 design. Real value now moves in USDC on a Base Sepolia escrow contract
 (`contracts/base/ReverseSpecEscrow.sol`, deployed at
-`0xD9ED7d01FeFc1740CB5244c713C15c518a1c198d`), not in native GEN inside the
+`0x8e07D1aE543c489D64E368A579Ac28cF8b541256`), not in native GEN inside the
 GenLayer contract. See "Why this needs GenLayer" and
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) below for the current design.
 
@@ -90,7 +90,7 @@ Base `Funded` events and calls `record_funding` on GenLayer;
   judging/consensus, and payout instructions (no fund custody).
 - **Base Sepolia escrow** ([contracts/base/ReverseSpecEscrow.sol](contracts/base/ReverseSpecEscrow.sol)) —
   holds the real USDC (`fund`, `settle` (relayer-only), `claim`); deployed
-  at `0xD9ED7d01FeFc1740CB5244c713C15c518a1c198d`.
+  at `0x8e07D1aE543c489D64E368A579Ac28cF8b541256`.
 - **Backend** ([backend/](backend/)) — wallet-signature auth (SIWE-style),
   mirror API, chain indexer, health checks. Runs 24/7 on Fly.io across 2
   machines (`auto_stop=off`, `min_machines_running=1`, health-check

@@ -37,3 +37,4 @@ coverage/
 .coverage
 htmlcov/
 scripts/.e2e_keys.json
+scripts/.e2e_keys_v2.json

@@ -14,7 +14,7 @@ import { useRouter } from "next/navigation";
 
 import { Button, Card, Field, inputCls } from "@/components/ui";
 import { api } from "@/lib/api";
-import { approveAndFund } from "@/lib/baseSepolia";
+import { approveAndFund, refundUnacknowledged } from "@/lib/baseSepolia";
 import { readContract, waitForTx, writeContract } from "@/lib/chain";
 import { parseUsdc } from "@/lib/format";
 import { useWallet } from "@/lib/wallet";
@@ -50,12 +50,26 @@ export default function CreateBountyPage() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [bountyId, setBountyId] = useState<number | null>(null);
+  const [depositId, setDepositId] = useState<bigint | null>(null);
+  const [savedDeposits, setSavedDeposits] = useState<Array<{ bountyId: number; depositId: bigint }>>([]);
 
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollDeadline = useRef<number>(0);
 
   useEffect(() => () => {
     if (pollTimer.current) clearInterval(pollTimer.current);
+  }, []);
+
+  useEffect(() => {
+    const saved: Array<{ bountyId: number; depositId: bigint }> = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (!key?.startsWith("reverse-spec-deposit:")) continue;
+      const id = Number(key.slice("reverse-spec-deposit:".length));
+      const value = localStorage.getItem(key);
+      if (Number.isSafeInteger(id) && value) saved.push({ bountyId: id, depositId: BigInt(value) });
+    }
+    setSavedDeposits(saved);
   }, []);
 
   function pollForOpen(id: number) {
@@ -66,6 +80,8 @@ export default function CreateBountyPage() {
         const fresh = await readContract<{ status: string }>("get_bounty", [id]);
         if (fresh.status === "OPEN") {
           if (pollTimer.current) clearInterval(pollTimer.current);
+          localStorage.removeItem(`reverse-spec-deposit:${id}`);
+          setSavedDeposits((current) => current.filter((item) => item.bountyId !== id));
           setPhase("open");
           router.push(`/bounty/${id}`);
           return;
@@ -98,16 +114,16 @@ export default function CreateBountyPage() {
     try {
       if (id === null) {
         const today = new Date().toISOString().slice(0, 10);
+        const creationRef = `${address.toLowerCase()}:${crypto.randomUUID()}`;
         const hash = await writeContract(address, "create_bounty", [
           title.trim(), spec.trim(), trueProblem.trim(), category.trim(),
           tags.split(",").map((t) => t.trim()).filter(Boolean).slice(0, 6).join(","),
-          today, deadline.trim(), windowSecs,
+          today, deadline.trim(), windowSecs, creationRef,
         ]);
         await waitForTx(hash);
 
-        const stats = await readContract<{ bounties_total: number }>(
-          "get_platform_stats").catch(() => null);
-        id = stats?.bounties_total ?? null;
+        id = Number(await readContract<number>(
+          "get_bounty_id_by_creation_ref", [creationRef]).catch(() => 0));
         if (!id) throw new Error("Bounty created but couldn't resolve its id");
         setBountyId(id);
 
@@ -128,11 +144,19 @@ export default function CreateBountyPage() {
       setPhase("created");
 
       setPhase("approving");
-      await approveAndFund(address, id, escrow);
+      if (id === null) throw new Error("Bounty id was not resolved");
+      const fundedBountyId = id;
+      const deposit = await approveAndFund(address, fundedBountyId, escrow);
+      setDepositId(deposit.depositId);
+      localStorage.setItem(`reverse-spec-deposit:${fundedBountyId}`, deposit.depositId.toString());
+      setSavedDeposits((current) => [
+        ...current.filter((item) => item.bountyId !== fundedBountyId),
+        { bountyId: fundedBountyId, depositId: deposit.depositId },
+      ]);
       // approveAndFund resolves once the fund() tx is confirmed on Base
       // Sepolia; the relayer still needs to relay it back to GenLayer.
       setPhase("funding");
-      pollForOpen(id);
+      pollForOpen(fundedBountyId);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Transaction failed");
       setPhase(id !== null ? "created" : "idle");
@@ -163,6 +187,19 @@ export default function CreateBountyPage() {
       return;
     }
     await create();
+  }
+
+  async function recoverDeposit(targetBountyId: number, targetDepositId: bigint) {
+    if (!address) return;
+    setError(null);
+    try {
+      await refundUnacknowledged(address, targetDepositId);
+      localStorage.removeItem(`reverse-spec-deposit:${targetBountyId}`);
+      setSavedDeposits((current) => current.filter((item) => item.depositId !== targetDepositId));
+      setError("Deposit refunded on Base Sepolia.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Refund failed");
+    }
   }
 
   return (
@@ -248,11 +285,17 @@ export default function CreateBountyPage() {
             </p>
           )}
           {phase === "timed-out" && (
-            <p className="rounded border border-warning/40 bg-warning/10 p-2.5 font-mono text-tag text-warning">
-              Funding was submitted but hasn&apos;t been confirmed yet. It
-              will appear as OPEN on the bounty page once the relayer picks
-              it up — you can also check again now.
-            </p>
+            <div className="rounded border border-warning/40 bg-warning/10 p-2.5 font-mono text-tag text-warning">
+              <p>Funding has not been acknowledged yet. You can keep checking;
+                if it remains unacknowledged, deposit #{depositId?.toString() ?? "…"}
+                becomes refundable after the escrow&apos;s seven-day safety delay.</p>
+              {depositId !== null && (
+                <button className="mt-2 underline" type="button"
+                  onClick={() => void recoverDeposit(bountyId!, depositId)}>
+                  Attempt safe refund
+                </button>
+              )}
+            </div>
           )}
 
           <Button onClick={() => void onButtonClick()} busy={busy}>
@@ -266,6 +309,26 @@ export default function CreateBountyPage() {
           )}
         </div>
       </Card>
+      {savedDeposits.length > 0 && (
+        <Card>
+          <h2 className="font-head text-h3 text-ink">Deposit recovery</h2>
+          <p className="mt-1 text-sm text-ink-soft">
+            Unacknowledged deposits can be recovered after seven days. The
+            escrow rejects refunds that were already acknowledged.
+          </p>
+          <div className="mt-3 flex flex-col gap-2">
+            {savedDeposits.map((item) => (
+              <div key={item.depositId.toString()} className="flex items-center justify-between gap-3 font-mono text-tag">
+                <span>Bounty #{item.bountyId} · deposit #{item.depositId.toString()}</span>
+                <button className="text-tertiary underline" type="button"
+                  onClick={() => void recoverDeposit(item.bountyId, item.depositId)}>
+                  Attempt refund
+                </button>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
     </div>
   );
 }

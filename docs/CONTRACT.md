@@ -3,9 +3,7 @@
 File: `contracts/reverse_spec_bounties.py` (single production contract,
 pinned `py-genlayer` runner, genvm-lint clean, ~1,646 lines).
 
-StudioNet address (pre-v1, native-GEN contract): `0x1DD671F0b8Be9e6fB7e7F2078261e1B840AF4439`
-— redeploy required for the v1 (USDC / split-custody) contract below; see
-[DEPLOYMENT.md](DEPLOYMENT.md).
+Production StudioNet address: `0x185cE8fff49fe93f57635aB03FC19B9e5d3D04e6`.
 
 ## Split custody (read this first)
 
@@ -21,8 +19,8 @@ ledger). See [ARCHITECTURE.md](ARCHITECTURE.md) for the full flow.
 
 | Method | Who | Effect |
 |---|---|---|
-| `create_bounty(title, spec, true_problem, category, tags_csv, created_note, deadline_note, submission_window_secs)` | anyone | Creates a `PENDING_FUNDING` bounty shell — **not payable**, no value attached. `submission_window_secs` must be 3600–2,592,000 (1h–30d). |
-| `record_funding(bounty_id, funder, amount, base_tx_hash)` | relayer only | Confirms a Base Sepolia USDC deposit; idempotent on `base_tx_hash`. Opens the bounty (`PENDING_FUNDING` → `OPEN`) once `amount >= MIN_BOUNTY_ESCROW` (1.00 USDC), and sets `submission_deadline = opened_at + submission_window_secs` |
+| `create_bounty(..., submission_window_secs, creation_ref)` | anyone | Creates a `PENDING_FUNDING` shell. The unique reference resolves through `get_bounty_id_by_creation_ref`, binding this creation transaction to the later deposit without a global counter. |
+| `record_funding(bounty_id, funder, amount, base_tx_hash)` | relayer only | Idempotently confirms a Base deposit and rejects any funder other than the bounty creator. Opens the bounty once the minimum is met. |
 | `cancel_bounty(id)` | creator | Refund if zero live submissions (works from `PENDING_FUNDING` or `OPEN`) |
 | `close_submissions(id)` | creator, or any solver with a live submission | OPEN → EVALUATING (abandonment recovery); reverts until `submission_deadline` has elapsed, for both paths |
 | `submit_solution(bounty_id, title, rationale, evidence_url)` | solver | Registers solution (https evidence required) |
@@ -71,9 +69,8 @@ evidence (`gl.nondet.web.render`) and judges (`gl.nondet.exec_prompt`), and
 comparison (±1 tier, ±12 banded points — tightened from ±20, and the older
 same-side-of-threshold fallback was removed so agreement is strictly
 tier-gap ≤1 **and** score-gap ≤12 — plus an exact `evidence_fetch_ok` match
-between leader and validator, and accept-on-own-infra-failure). This is
-what prevents leader rotation and UNDETERMINED outcomes without being a
-rubber stamp.
+between leader and validator). Independent fetch/AI failure rejects the
+leader result: infrastructure failure is never treated as financial agreement.
 
 ## Error taxonomy
 

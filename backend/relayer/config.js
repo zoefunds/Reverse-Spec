@@ -26,6 +26,10 @@ export const config = {
       process.env.BASE_SEPOLIA_STAKE_CONFIRMATIONS ?? "5",
       10,
     ),
+    fundingStartBlock: parseInt(
+      process.env.BASE_SEPOLIA_FUNDING_START_BLOCK ?? "0",
+      10,
+    ),
   },
 };
 

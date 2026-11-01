@@ -6,7 +6,7 @@ the network is unreachable. Run:  .venv/bin/pytest contracts-tests/integration/ 
 
 import pytest
 
-CONTRACT = "0x1DD671F0b8Be9e6fB7e7F2078261e1B840AF4439"
+CONTRACT = "0x185cE8fff49fe93f57635aB03FC19B9e5d3D04e6"
 
 
 @pytest.fixture(scope="module")

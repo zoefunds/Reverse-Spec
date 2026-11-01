@@ -1,13 +1,8 @@
 import fs from "node:fs";
 import { config } from "./config.js";
 
-/** Tiny local JSON sync-state store: this relayer only needs to remember
- * where it last scanned Base Sepolia for `Funded` events. Correctness
- * against double-application does NOT depend on this file — both
- * GenLayer's `record_funding`/`mark_settled` and the escrow's `settle()`
- * are independently idempotent on-chain (by base_tx_hash / one-shot per
- * bounty). Losing this file just means a wider re-scan next boot, not a
- * double-credit. */
+/** Durable local state. Writes use same-directory atomic rename so a crash
+ * cannot publish a cursor without the pending deposits discovered with it. */
 function readAll() {
   try {
     return JSON.parse(fs.readFileSync(config.stateFile, "utf8"));
@@ -21,7 +16,14 @@ export function getSyncState(key) {
 }
 
 export function setSyncState(key, value) {
+  updateSyncState((all) => { all[key] = value; });
+}
+
+export function updateSyncState(mutator) {
   const all = readAll();
-  all[key] = value;
-  fs.writeFileSync(config.stateFile, JSON.stringify(all, null, 2));
+  mutator(all);
+  const temporary = `${config.stateFile}.${process.pid}.tmp`;
+  fs.writeFileSync(temporary, JSON.stringify(all, null, 2), { mode: 0o600 });
+  fs.renameSync(temporary, config.stateFile);
+  return all;
 }

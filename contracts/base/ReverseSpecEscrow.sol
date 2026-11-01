@@ -13,6 +13,9 @@ interface IERC20 {
 
 contract ReverseSpecEscrow {
     struct BountyPool { uint256 deposited; uint256 allocated; bool settled; }
+    struct Deposit { uint256 bountyId; address funder; uint256 amount; uint64 refundableAt; bool acknowledged; bool refunded; }
+
+    uint256 public constant REFUND_DELAY = 7 days;
 
     IERC20 public immutable usdc;
     address public owner;
@@ -20,8 +23,13 @@ contract ReverseSpecEscrow {
     bool private locked;
     mapping(uint256 => BountyPool) public pools;
     mapping(uint256 => mapping(address => uint256)) public claimable;
+    mapping(uint256 => Deposit) public deposits;
+    mapping(uint256 => uint256) public unacknowledgedTotal;
+    uint256 public depositSeq;
 
-    event Funded(uint256 indexed bountyId, address indexed funder, uint256 amount);
+    event Funded(uint256 indexed bountyId, address indexed funder, uint256 amount, uint256 indexed depositId);
+    event DepositAcknowledged(uint256 indexed depositId);
+    event DepositRefunded(uint256 indexed depositId, address indexed funder, uint256 amount);
     event Settled(uint256 indexed bountyId, uint256 recipientCount, uint256 allocated);
     event Claimed(uint256 indexed bountyId, address indexed recipient, uint256 amount);
     event RelayerUpdated(address indexed relayer);
@@ -47,7 +55,35 @@ contract ReverseSpecEscrow {
         require(amount > 0 && !pools[bountyId].settled, "invalid funding");
         require(usdc.transferFrom(msg.sender, address(this), amount), "USDC transferFrom failed");
         pools[bountyId].deposited += amount;
-        emit Funded(bountyId, msg.sender, amount);
+        unacknowledgedTotal[bountyId] += amount;
+        uint256 depositId = ++depositSeq;
+        deposits[depositId] = Deposit(bountyId, msg.sender, amount, uint64(block.timestamp + REFUND_DELAY), false, false);
+        emit Funded(bountyId, msg.sender, amount, depositId);
+    }
+
+    function acknowledgeDeposit(uint256 depositId) external onlyRelayer {
+        Deposit storage deposit = deposits[depositId];
+        require(deposit.funder != address(0), "unknown deposit");
+        if (deposit.acknowledged) return;
+        require(!deposit.refunded, "deposit refunded");
+        deposit.acknowledged = true;
+        unacknowledgedTotal[deposit.bountyId] -= deposit.amount;
+        emit DepositAcknowledged(depositId);
+    }
+
+    /// @notice Recover a mistaken or permanently unacknowledged deposit.
+    function refundUnacknowledged(uint256 depositId) external nonReentrant {
+        Deposit storage deposit = deposits[depositId];
+        require(msg.sender == deposit.funder, "not funder");
+        require(!deposit.acknowledged && !deposit.refunded, "not refundable");
+        require(block.timestamp >= deposit.refundableAt, "refund delay active");
+        BountyPool storage pool = pools[deposit.bountyId];
+        require(pool.deposited - pool.allocated >= deposit.amount, "funds already allocated");
+        deposit.refunded = true;
+        unacknowledgedTotal[deposit.bountyId] -= deposit.amount;
+        pool.deposited -= deposit.amount;
+        require(usdc.transfer(deposit.funder, deposit.amount), "USDC transfer failed");
+        emit DepositRefunded(depositId, deposit.funder, deposit.amount);
     }
 
     /// @notice Idempotency is enforced on-chain: one finalized payout list
@@ -63,7 +99,7 @@ contract ReverseSpecEscrow {
             require(recipients[i] != address(0), "zero recipient");
             total += amounts[i];
         }
-        require(total <= pool.deposited, "allocation exceeds pool");
+        require(total <= pool.deposited - unacknowledgedTotal[bountyId], "allocation exceeds acknowledged pool");
         pool.settled = true;
         pool.allocated = total;
         for (uint256 i; i < amounts.length; ++i) claimable[bountyId][recipients[i]] += amounts[i];
@@ -82,11 +118,13 @@ contract ReverseSpecEscrow {
         require(relayer_ != address(0), "zero relayer"); relayer = relayer_; emit RelayerUpdated(relayer_);
     }
 
-    /// @notice Recover unallocated USDC (dust, or a bounty cancelled before
-    /// any settle was ever relayed).
+    /// @notice Recover post-settlement dust only. Before settlement,
+    /// unacknowledged deposits remain reserved for their funders' timeout
+    /// recovery and acknowledged deposits remain reserved for adjudication.
     function withdrawUnallocated(uint256 bountyId, address to, uint256 amount) external onlyOwner nonReentrant {
         BountyPool storage pool = pools[bountyId];
-        require(to != address(0) && amount <= pool.deposited - pool.allocated, "invalid withdrawal");
+        require(pool.settled, "bounty not settled");
+        require(to != address(0) && amount <= pool.deposited - pool.allocated - unacknowledgedTotal[bountyId], "invalid withdrawal");
         pool.deposited -= amount;
         require(usdc.transfer(to, amount), "USDC transfer failed");
     }

@@ -1,28 +1,23 @@
-"""E2E continuation: remaining submissions + full lifecycle on a 5th bounty.
+"""Legacy GenLayer-only lifecycle continuation.
 
-Keys are persisted to scripts/.e2e_keys.json (gitignored) so creator
-actions remain possible across runs.
+This is not the real payment-path E2E: it uses synthetic relay writes. Use
+`npm run e2e:payment` in backend/relayer for release evidence.
 """
 
-import json
 import os
-import secrets
 import time
 
 from genlayer_py import create_account, create_client
 from genlayer_py.chains import studionet
 from genlayer_py.types import TransactionStatus
 
-CONTRACT = "0x1DD671F0b8Be9e6fB7e7F2078261e1B840AF4439"
+CONTRACT = "0x185cE8fff49fe93f57635aB03FC19B9e5d3D04e6"
 USDC = 10**6
-KEYS = os.path.join(os.path.dirname(__file__), ".e2e_keys.json")
-
-if os.path.exists(KEYS):
-    keys = json.load(open(KEYS))
-else:
-    keys = {name: "0x" + secrets.token_hex(32)
-            for name in ("creator", "solver_a", "solver_b")}
-    json.dump(keys, open(KEYS, "w"))
+keys = {name: os.environ.get(f"E2E_{name.upper()}_PRIVATE_KEY", "")
+        for name in ("creator", "solver_a", "solver_b")}
+missing = [name for name, value in keys.items() if not value]
+if missing:
+    raise RuntimeError("Missing secret-managed E2E keys: " + ", ".join(missing))
 
 creator = create_account(keys["creator"])
 solver_a = create_account(keys["solver_a"])
@@ -124,6 +119,7 @@ def main():
         "notion of concurrent editing. Conflict-free replicated data types "
         "or operational transforms may be the actual fix.",
         "UX", "offline,sync,crdt,mobile", "2026-07-17", "2026-09-30", 3600,
+        f"e2e-part2-{time.time_ns()}",
     ], label="create_bounty #5 (lifecycle)")
     stats = read("get_platform_stats")
     b5 = int(stats["bounties_total"])

@@ -3,17 +3,18 @@
 # Background poller, no HTTP surface. Runs 24/7 so funding deposits and
 # payout settlements get relayed without a human driving it manually.
 
-app = "reverse-spec-relayer"
+app = "reverse-spec-production-relayer"
 primary_region = "iad"
 
 [build]
 
 [env]
   GENLAYER_NETWORK = "studionet"
-  GENLAYER_CONTRACT_ADDRESS = "0x324dff69efA46b82BcE267F5Ad6d30C2281397Df"
+  GENLAYER_CONTRACT_ADDRESS = "0x185cE8fff49fe93f57635aB03FC19B9e5d3D04e6"
   BASE_SEPOLIA_RPC_URL = "https://sepolia.base.org"
   BASE_SEPOLIA_USDC_ADDRESS = "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
-  REVERSE_SPEC_ESCROW_ADDRESS = "0xCDfF36cDA76e08BAd2EA0d5a3fDaDf3761Ed5041"
+  REVERSE_SPEC_ESCROW_ADDRESS = "0x8e07D1aE543c489D64E368A579Ac28cF8b541256"
+  BASE_SEPOLIA_FUNDING_START_BLOCK = "52994901"
   BASE_SEPOLIA_STAKE_CONFIRMATIONS = "5"
   RELAYER_POLL_INTERVAL_MS = "30000"
   # Secret (set via `fly secrets set`): BASE_SEPOLIA_RELAYER_PRIVATE_KEY

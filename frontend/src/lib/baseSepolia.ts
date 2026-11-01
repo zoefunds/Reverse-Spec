@@ -12,7 +12,7 @@
  */
 
 import {
-  createPublicClient, createWalletClient, custom, http, defineChain,
+  createPublicClient, createWalletClient, custom, decodeEventLog, http, defineChain,
 } from "viem";
 
 import { CONFIG } from "@/lib/config";
@@ -59,6 +59,15 @@ export const USDC_ABI = [
 
 export const ESCROW_ABI = [
   {
+    type: "event", name: "Funded",
+    inputs: [
+      { name: "bountyId", type: "uint256", indexed: true },
+      { name: "funder", type: "address", indexed: true },
+      { name: "amount", type: "uint256", indexed: false },
+      { name: "depositId", type: "uint256", indexed: true },
+    ],
+  },
+  {
     type: "function", name: "fund", stateMutability: "nonpayable",
     inputs: [
       { name: "bountyId", type: "uint256" },
@@ -70,6 +79,10 @@ export const ESCROW_ABI = [
     type: "function", name: "claim", stateMutability: "nonpayable",
     inputs: [{ name: "bountyId", type: "uint256" }],
     outputs: [],
+  },
+  {
+    type: "function", name: "refundUnacknowledged", stateMutability: "nonpayable",
+    inputs: [{ name: "depositId", type: "uint256" }], outputs: [],
   },
   {
     type: "function", name: "claimable", stateMutability: "view",
@@ -140,7 +153,7 @@ export async function ensureBaseSepolia(account: `0x${string}`): Promise<void> {
  */
 export async function approveAndFund(
   account: `0x${string}`, bountyId: number, amountBaseUnits: bigint,
-): Promise<`0x${string}`> {
+): Promise<{ hash: `0x${string}`; depositId: bigint }> {
   await ensureBaseSepolia(account);
   const wallet = getBaseWalletClient(account);
   const client = getBasePublicClient();
@@ -168,7 +181,28 @@ export async function approveAndFund(
   if (receipt.status !== "success") {
     throw new Error("Funding transaction failed on Base Sepolia");
   }
-  return fundHash;
+  const fundedLog = receipt.logs.find((log) => log.address.toLowerCase() === ESCROW_ADDRESS.toLowerCase());
+  if (!fundedLog) throw new Error("Funding confirmed but deposit id was not emitted");
+  const decoded = decodeEventLog({ abi: ESCROW_ABI, data: fundedLog.data, topics: fundedLog.topics });
+  if (decoded.eventName !== "Funded") throw new Error("Unexpected escrow funding event");
+  return { hash: fundHash, depositId: decoded.args.depositId };
+}
+
+/** Recover a deposit that the relayer never acknowledged. The escrow enforces
+ * the seven-day delay and rejects acknowledged/already-refunded deposits. */
+export async function refundUnacknowledged(
+  account: `0x${string}`, depositId: bigint,
+): Promise<`0x${string}`> {
+  await ensureBaseSepolia(account);
+  const wallet = getBaseWalletClient(account);
+  const client = getBasePublicClient();
+  const hash = await wallet.writeContract({
+    address: ESCROW_ADDRESS, abi: ESCROW_ABI,
+    functionName: "refundUnacknowledged", args: [depositId],
+  });
+  const receipt = await client.waitForTransactionReceipt({ hash });
+  if (receipt.status !== "success") throw new Error("Deposit refund failed");
+  return hash;
 }
 
 /** Read how much USDC `account` can currently claim for `bountyId`. */

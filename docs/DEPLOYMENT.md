@@ -2,11 +2,10 @@
 
 ## Contract (GenLayer StudioNet)
 
-Pre-v1 (native-GEN) contract, deployed via GenLayer Studio by the project
-owner: `0x1DD671F0b8Be9e6fB7e7F2078261e1B840AF4439`.
+Production contract: `0x185cE8fff49fe93f57635aB03FC19B9e5d3D04e6`.
 
-The v1 rewrite (split-custody, USDC funding via Base Sepolia) requires a
-fresh deploy — the constructor sets both `owner` and `relayer` to the
+The current acknowledgment/recovery revision requires a fresh coordinated
+deploy — the constructor sets both `owner` and `relayer` to the
 deploying address, so **deploy the Base Sepolia escrow first** (below),
 then deploy this contract from the same relayer key so the two sides agree
 on who the relayer is.
@@ -26,10 +25,11 @@ redeploying.
 deployed before the GenLayer contract goes live, since the GenLayer side
 needs a `relayer` address that matches the escrow's `relayer`. It's
 already deployed for this project at
-`0xD9ED7d01FeFc1740CB5244c713C15c518a1c198d` on Base Sepolia (USDC token
+`0x8e07D1aE543c489D64E368A579Ac28cF8b541256` on Base Sepolia (USDC token
 `0x036CbD53842c5426634e7929541eC2318f3dCF7e`, relayer/owner
 `0x7401c129EDfc26E68FE19309fE461eb3Db1058Eb`) — redeploy only if you need a
-fresh instance (e.g. a new relayer key, a different environment).
+fresh instance (the current source adds per-deposit acknowledgement and timed
+refunds, so this redeploy is mandatory for the remediation milestone).
 
 ```bash
 cd contracts/base
@@ -63,6 +63,21 @@ After deploying, configure `backend/relayer/` (`fundingRelay.js` /
 `payoutRelay.js`) with the escrow address, the GenLayer contract address,
 and the relayer private key so it can bridge `Funded` events into
 `record_funding` and `get_base_payouts` into `settle()`/`mark_settled`.
+
+Set `BASE_SEPOLIA_FUNDING_START_BLOCK` to the escrow deployment block. With no
+stored cursor the relayer replays from that block. Each scan atomically persists
+new pending events with its cursor; pending acknowledgements retry independently
+across restarts and cannot be skipped or stall discovery of later ranges.
+
+## Real payment-path regression
+
+With the relayer running, execute `npm run e2e:payment` in `backend/relayer`.
+It performs a real Base Sepolia USDC approval/deposit, waits for automatic
+funding acknowledgement, submits evidence, waits through the one-hour protocol
+floor, runs consensus and finalization, waits for automatic Base settlement,
+and makes the final USDC claim. It never directly calls `record_funding` or
+`mark_settled`. Inject the two E2E keys and `E2E_EVIDENCE_URL` from a secret
+manager.
 
 ## Backend — Fly.io (24/7)
 

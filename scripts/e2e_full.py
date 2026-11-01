@@ -1,4 +1,4 @@
-"""Full E2E protocol test against the redeployed StudioNet contract.
+"""Legacy GenLayer-only consensus smoke test.
 
 Creates 4 professional bounties (10-50 USDC), 4 submissions with real
 public evidence, then runs the COMPLETE lifecycle on bounty 1: close ->
@@ -7,28 +7,26 @@ with a post-settlement assertion that get_base_payouts empties (payouts
 are now instructions for a separate Base Sepolia escrow contract, not
 on-chain GEN claims). Bounties 2-4 remain OPEN as live inventory.
 
-Run:  .venv/bin/python scripts/e2e_full.py
+This directly invokes synthetic relay writes and is not payment-path release
+evidence. Use `npm run e2e:payment` in backend/relayer for that.
 """
 
-import json
 import os
-import secrets
 import time
 
 from genlayer_py import create_account, create_client
 from genlayer_py.chains import studionet
 from genlayer_py.types import TransactionStatus
 
-CONTRACT = "0x1DD671F0b8Be9e6fB7e7F2078261e1B840AF4439"
+CONTRACT = "0x185cE8fff49fe93f57635aB03FC19B9e5d3D04e6"
 USDC = 10**6
-KEYS = os.path.join(os.path.dirname(__file__), ".e2e_keys_v2.json")
-
-if os.path.exists(KEYS):
-    keys = json.load(open(KEYS))
-else:
-    keys = {n: "0x" + secrets.token_hex(32)
-            for n in ("creator", "solver_a", "solver_b")}
-    json.dump(keys, open(KEYS, "w"))
+keys = {name: os.environ.get(f"E2E_{name.upper()}_PRIVATE_KEY", "")
+        for name in ("creator", "solver_a", "solver_b")}
+missing_keys = [name for name, value in keys.items() if not value]
+if missing_keys:
+    raise RuntimeError(
+        "Missing ephemeral E2E keys: " + ", ".join(missing_keys) +
+        ". Supply them through a secret manager; keys are never written to disk.")
 
 creator = create_account(keys["creator"])
 solver_a = create_account(keys["solver_a"])
@@ -207,7 +205,7 @@ def main():
     for i, b in enumerate(BOUNTIES):
         write(c_creator, "create_bounty",
               [b["title"], b["spec"], b["true_problem"], b["category"],
-               b["tags"], "2026-07-17", b["deadline"], 3600],
+               b["tags"], "2026-07-17", b["deadline"], 3600, f"e2e-full-{i}-{time.time_ns()}"],
               label=f"create_bounty ({b['escrow'] / USDC:,.2f} USDC) "
                     f"{b['title'][:44]}…")
         bounty_id = int(read("get_platform_stats")["bounties_total"])

@@ -1,4 +1,4 @@
-"""End-to-end protocol test against the DEPLOYED StudioNet contract.
+"""Legacy GenLayer-only consensus smoke test against StudioNet.
 
 Exercises every flow the website exposes, with realistic professional
 content: create 4 funded bounties (10-50 USDC), submit solutions with
@@ -7,7 +7,8 @@ real web fetch on StudioNet validators), finalize payouts, mark them
 settled via the relayer-only mark_settled call, and verify the escrow
 invariant end to end.
 
-Run:  .venv/bin/python scripts/e2e_studionet.py
+This directly invokes synthetic relay writes and is not payment-path release
+evidence. Use `npm run e2e:payment` in backend/relayer for that.
 """
 
 import sys
@@ -17,7 +18,7 @@ from genlayer_py import create_account, create_client
 from genlayer_py.chains import studionet
 from genlayer_py.types import TransactionStatus
 
-CONTRACT = "0x1DD671F0b8Be9e6fB7e7F2078261e1B840AF4439"
+CONTRACT = "0x185cE8fff49fe93f57635aB03FC19B9e5d3D04e6"
 USDC = 10**6
 
 creator = create_account()
@@ -243,7 +244,7 @@ def main() -> None:
     for i, b in enumerate(BOUNTIES):
         write(c_creator, "create_bounty",
               [b["title"], b["spec"], b["true_problem"], b["category"],
-               b["tags"], "2026-07-17", b["deadline"], 3600],
+               b["tags"], "2026-07-17", b["deadline"], 3600, f"e2e-studio-{i}-{time.time_ns()}"],
               label=f"create_bounty '{b['title'][:48]}…' "
                     f"({b['escrow'] / USDC:,.2f} USDC)")
         stats = read("get_platform_stats")

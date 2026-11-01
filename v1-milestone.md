@@ -144,8 +144,8 @@ Two polling loops:
 
 | Component | Address |
 |---|---|
-| GenLayer contract (StudioNet, chain 61999) | `0x324dff69efA46b82BcE267F5Ad6d30C2281397Df` |
-| Base Sepolia escrow (`ReverseSpecEscrow.sol`) | `0xCDfF36cDA76e08BAd2EA0d5a3fDaDf3761Ed5041` |
+| GenLayer contract (StudioNet, chain 61999) | `0x185cE8fff49fe93f57635aB03FC19B9e5d3D04e6` |
+| Base Sepolia escrow (`ReverseSpecEscrow.sol`) | `0x8e07D1aE543c489D64E368A579Ac28cF8b541256` |
 | USDC (Base Sepolia) | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` |
 | Owner / relayer (both contracts) | `0x7401c129EDfc26E68FE19309fE461eb3Db1058Eb` |
 

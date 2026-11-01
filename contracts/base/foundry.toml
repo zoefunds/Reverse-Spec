@@ -1,0 +1,6 @@
+[profile.default]
+src = "."
+test = "test"
+out = "/tmp/reverse-spec-forge-out"
+cache_path = "/tmp/reverse-spec-forge-cache"
+solc = "0.8.24"

@@ -3,7 +3,7 @@
 # 24/7 requirement: machines never auto-stop, at least one always running,
 # health checks auto-restart unhealthy machines.
 
-app = "reverse-spec-bounties-api"
+app = "reverse-spec-production-api"
 primary_region = "iad"
 
 [build]
@@ -16,7 +16,7 @@ primary_region = "iad"
 [env]
   ENVIRONMENT = "production"
   GENLAYER_NETWORK = "studionet"
-  GENLAYER_CONTRACT_ADDRESS = "0xa588Cb1BAa336EC0C382203F4c1F0ddf2f3229fE"
+  GENLAYER_CONTRACT_ADDRESS = "0x185cE8fff49fe93f57635aB03FC19B9e5d3D04e6"
   INDEXER_ENABLED = "true"
   INDEXER_INTERVAL_SECONDS = "120"
   # Secrets (set via `fly secrets set`): DATABASE_URL, JWT_SECRET, CORS_ORIGINS
