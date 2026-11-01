@@ -3,12 +3,24 @@ import assert from "node:assert/strict";
 
 import { scanAndApply } from "./fundingRelay.js";
 import { normalizePrivateKey } from "./config.js";
+import { plain } from "./genlayer.js";
 
 const logger = { info() {}, warn() {}, error() {} };
 
 test("normalizes secret-manager private keys for both ethers and GenLayer", () => {
   assert.equal(normalizePrivateKey("ab"), "0xab");
   assert.equal(normalizePrivateKey("0xab"), "0xab");
+});
+
+test("normalizes nested GenLayer map results for payout discovery", () => {
+  const value = new Map([
+    ["bounties_total", 1n],
+    ["payouts", [new Map([["recipient", "0xabc"], ["amount", 5_000_000n]])]],
+  ]);
+  assert.deepEqual(plain(value), {
+    bounties_total: 1,
+    payouts: [{ recipient: "0xabc", amount: 5_000_000 }],
+  });
 });
 
 test("durably queues and retries an interrupted GenLayer acknowledgement", async () => {

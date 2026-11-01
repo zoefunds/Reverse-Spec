@@ -1,7 +1,6 @@
 # Financial lifecycle remediation milestone
 
-Status: implementation complete; coordinated redeployment and live E2E remain
-operational release gates.
+Status: complete and deployed to production on 2026-11-01.
 
 ## Acceptance evidence
 
@@ -20,14 +19,14 @@ operational release gates.
 - The tracked E2E key file is removed and ignored. E2E credentials are injected
   only from a secret manager. `docs/SECURITY-KEY-ROTATION.md` documents wallet
   retirement and full-history removal; these operational steps are mandatory.
-- Address defaults and deployment examples use one v1 pair. Because this
-  milestone changes both contracts, release requires new coordinated addresses
-  to replace that pair everywhere before production traffic is enabled.
+- Address defaults and deployment examples use the coordinated production pair:
+  GenLayer `0x185cE8fff49fe93f57635aB03FC19B9e5d3D04e6` and Base Sepolia
+  `0x8e07D1aE543c489D64E368A579Ac28cF8b541256` (deployment block `52994901`).
 - `npm run e2e:payment` is the release-gate test. It uses actual Base Sepolia
   USDC, automatic relaying, real consensus, automatic settlement, and a final
   Base claim; it contains no synthetic funding or settlement identifiers.
 
-## Verified locally
+## Verification
 
 - 51 GenLayer direct contract tests pass.
 - Funding relayer interrupted-acknowledgement regression passes.
@@ -36,14 +35,26 @@ operational release gates.
 - Frontend production build passes.
 - `ReverseSpecEscrow.sol` compiles with the pinned local `solcjs`.
 - `git diff --check` passes.
+- 13 backend API tests and four relayer tests pass.
+- The production frontend is live at `https://reverse-spec.vercel.app` and the
+  replacement Fly services are `reverse-spec-production-api` and
+  `reverse-spec-production-relayer`.
 
-## Release gates
+## Live payment-path evidence
 
-1. Rotate/retire all wallets exposed by historical E2E credentials and purge
-   the file from remote Git history.
-2. Deploy the revised Base escrow and GenLayer contract from the replacement
-   relayer identity.
-3. Update every address in the documented configuration surfaces and set the
-   funding replay start block to the new escrow deployment block.
-4. Run the real payment-path E2E and retain its Base/GenLayer transaction hashes
-   as release evidence.
+- Bounty: `1`; real Base deposit: `5,000,000` USDC units.
+- Base funding transaction:
+  `0x506953a913f8b420f22f6d0fdc4020f3cc4c828529199699ee3791df04ae3022`.
+- GenLayer solver submission:
+  `0x8a3a546e7afd09d40cd68b6463b425cbebee47706843ae4e223b82c2d9b85336`.
+- Automatic Base settlement:
+  `0xa2ad3d0f7f23e6813d4b54b21109d30bb99970847340e96cab562308e12e91fa`.
+- Creator claim (`250,000` units):
+  `0xc0e708a80dc6347ba7c4ccdcbed5488d1d5bd360a5b6dbd07e0a70d02c36e033`.
+- Solver claim (`4,750,000` units):
+  `0x5e1f5610d451cbc175c36dc22828e0d67dbf130e987c2971bfa23b5488dbd740`.
+- Runner result: `PASS bounty=1 creator_claim=250000 solver_claim=4750000`.
+
+The exposed historical E2E wallets were retired, their remaining balances were
+swept, and the tracked credential file was removed from current and rewritten
+remote Git history before this deployment.

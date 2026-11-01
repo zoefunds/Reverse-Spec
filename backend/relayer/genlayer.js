@@ -20,11 +20,11 @@ function getSharedClient(logger) {
 }
 
 export async function readContract(functionName, args = []) {
-  return getSharedClient().readContract({
+  return plain(await getSharedClient().readContract({
     address: config.genlayerContractAddress,
     functionName,
     args,
-  });
+  }));
 }
 
 export function getWriteClient(logger) {
