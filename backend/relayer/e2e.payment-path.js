@@ -57,8 +57,14 @@ function plain(value) {
 async function poll(label, fn, timeoutMs = 15 * 60_000) {
   const end = Date.now() + timeoutMs;
   while (Date.now() < end) {
-    const value = await fn();
-    if (value) return value;
+    try {
+      const value = await fn();
+      if (value) return value;
+    } catch (error) {
+      // Public testnet gateways occasionally return a proxy HTML page or a
+      // transient 5xx. Polling is read-only and safe to retry until timeout.
+      console.warn(`transient error while waiting for ${label}: ${error.shortMessage ?? error.message}`);
+    }
     await sleep(5000);
   }
   throw new Error(`timeout waiting for ${label}`);
@@ -99,11 +105,14 @@ await poll("automatic funding acknowledgement", async () => {
 });
 console.log(`funding acknowledged: bounty=${bountyId} deposit=${depositId}`);
 
-const submissionId = await write(solver, "submit_solution", [
-  bountyId, "Executable evidence for the real payment path",
-  "The linked artifact demonstrates actual funding observation, independent consensus evaluation, settlement, and pull-based claiming.",
-  evidenceUrl,
-]);
+let submissionId = process.env.E2E_RESUME_SUBMISSION_TX ?? "";
+if (!submissionId) {
+  submissionId = await write(solver, "submit_solution", [
+    bountyId, "Executable evidence for the real payment path",
+    "The linked artifact demonstrates actual funding observation, independent consensus evaluation, settlement, and pull-based claiming.",
+    evidenceUrl,
+  ]);
+}
 console.log(`funded bounty=${bountyId}; submission tx=${submissionId}; waiting for protocol deadline`);
 
 await poll("submission deadline", async () => {
