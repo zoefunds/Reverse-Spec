@@ -9,8 +9,10 @@ next, roughly in order:
 
 - **Relayer decentralization / liveness.** The v1 split-custody design
   depends on a single trusted relayer address to bridge Base Sepolia
-  funding/settlement events into GenLayer (`record_funding`,
-  `mark_settled`) and back (`get_base_payouts` → `settle()`). It's
+  funding/settlement events into GenLayer (`record_funding` → Base
+  acknowledgement → `activate_funding`, plus `mark_settled`) and back
+  (`get_base_payouts` → `settle()`). Refunded deposits are reconciled with
+  `void_funding`. It's
   owner-rotatable (`set_relayer`) but still a single point of liveness
   failure; multi-relayer or watchtower redundancy is the natural next
   hardening step now that funds live off GenLayer entirely.

@@ -1,7 +1,7 @@
 # ReverseSpecBounties — Contract Reference
 
 File: `contracts/reverse_spec_bounties.py` (single production contract,
-pinned `py-genlayer` runner, genvm-lint clean, ~1,650 lines).
+pinned `py-genlayer` runner, genvm-lint clean, ~1,700 lines).
 
 Production StudioNet address: `0x75B9094aCd67bfC450B07fFA07A63b2446260Eaf`.
 Paired Base Sepolia escrow:

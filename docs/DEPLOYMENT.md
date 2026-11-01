@@ -79,8 +79,9 @@ and makes the final USDC claim. It never directly calls `record_funding` or
 `mark_settled`. Inject the two E2E keys and `E2E_EVIDENCE_URL` from a secret
 manager.
 
-The production run completed successfully for bounty `1`; its Base funding,
-settlement, and claim transaction hashes are recorded in
+The full consensus run completed successfully on the immediately preceding
+contract pair. The current pair separately passed the faster real-value smoke
+below. Both sets of transaction hashes are clearly labeled in
 [`../remediation-milestone.md`](../remediation-milestone.md).
 
 For a faster real-value deployment check, run `npm run e2e:funding-smoke`. It

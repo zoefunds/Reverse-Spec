@@ -29,6 +29,10 @@ Status: complete and deployed to production on 2026-11-01.
 - Address defaults and deployment examples use the coordinated production pair:
   GenLayer `0x75B9094aCd67bfC450B07fFA07A63b2446260Eaf` and Base Sepolia
   `0x7e83C2136f9C6e259187E737501086bc84EC0595` (deployment block `53031221`).
+- The current GenLayer deployment transaction is
+  `0xff3f9fba5dcbdd9dc53f570032429b386a192b05f05988867bf02609a396b5c5`;
+  the current Base escrow deployment transaction is
+  `0x2d7334ce6c5e834e10d4c52bfe45490942e5e2a0f1f3c41d5474d5e06eab051c`.
 - `npm run e2e:payment` is the release-gate test. It uses actual Base Sepolia
   USDC, automatic relaying, real consensus, automatic settlement, and a final
   Base claim; it contains no synthetic funding or settlement identifiers.

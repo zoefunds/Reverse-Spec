@@ -36,10 +36,14 @@ and transaction hashes are in
 
 ## Acceptance result
 
-The real production payment-path regression passed with no synthetic funding or
-settlement identifiers: 5 USDC was deposited on Base, automatically
-acknowledged on GenLayer, evaluated by consensus, automatically settled on
-Base, and claimed as 4.75 USDC by the sole winner and 0.25 USDC by the creator.
+The full payment-path regression passed on the preceding coordinated pair with
+no synthetic funding or settlement identifiers: 5 USDC was deposited on Base,
+automatically acknowledged on GenLayer, evaluated by consensus, automatically
+settled on Base, and claimed as 4.75 USDC by the sole winner and 0.25 USDC by
+the creator. After the atomic activation upgrade, the current pair passed a
+real 1 USDC commitment → acknowledgement → activation → cancellation →
+settlement → claim smoke. Current and historical transaction evidence is kept
+separate in [remediation-milestone.md](remediation-milestone.md).
 
 Verification baseline: 52 contract tests, 13 backend tests, 7 relayer tests, 4
 Foundry escrow tests, and a successful frontend production build.

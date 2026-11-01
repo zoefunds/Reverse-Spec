@@ -85,7 +85,7 @@ Base `Funded` events and runs `record_funding` → Base acknowledgement →
 `escrow.settle()` on Base, then calls `mark_settled` back on GenLayer).
 
 - **Contract** ([contracts/reverse_spec_bounties.py](contracts/reverse_spec_bounties.py)) — single
-  ~1,650-line production contract; source of truth for bounty lifecycle,
+  ~1,700-line production contract; source of truth for bounty lifecycle,
   judging/consensus, and payout instructions (no fund custody).
 - **Base Sepolia escrow** ([contracts/base/ReverseSpecEscrow.sol](contracts/base/ReverseSpecEscrow.sol)) —
   holds the real USDC (`fund`, `settle` (relayer-only), `claim`); deployed
