@@ -17,11 +17,16 @@ primary_region = "iad"
   BASE_SEPOLIA_FUNDING_START_BLOCK = "52994901"
   BASE_SEPOLIA_STAKE_CONFIRMATIONS = "5"
   RELAYER_POLL_INTERVAL_MS = "30000"
+  RELAYER_STATE_FILE = "/data/relayer-state.json"
   # Secret (set via `fly secrets set`): BASE_SEPOLIA_RELAYER_PRIVATE_KEY
 
 [[vm]]
   size = "shared-cpu-1x"
   memory = "256mb"
+
+[mounts]
+  source = "relayer_state"
+  destination = "/data"
 
 [processes]
   app = "node index.js"

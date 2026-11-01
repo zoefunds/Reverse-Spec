@@ -20,21 +20,18 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "bounties",
-        sa.Column("submission_window_secs", sa.Integer(),
-                  nullable=False, server_default="0"),
-    )
-    op.add_column(
-        "bounties",
-        sa.Column("opened_at", sa.Integer(), nullable=False,
-                  server_default="0"),
-    )
-    op.add_column(
-        "bounties",
-        sa.Column("submission_deadline", sa.Integer(), nullable=False,
-                  server_default="0"),
-    )
+    # 0001 bootstraps from current model metadata, so a brand-new database
+    # may already contain fields introduced by later migrations. Existing
+    # production databases created by the original 0001 still need them.
+    existing = {
+        column["name"] for column in sa.inspect(op.get_bind()).get_columns("bounties")
+    }
+    for name in ("submission_window_secs", "opened_at", "submission_deadline"):
+        if name not in existing:
+            op.add_column(
+                "bounties",
+                sa.Column(name, sa.Integer(), nullable=False, server_default="0"),
+            )
 
 
 def downgrade() -> None:

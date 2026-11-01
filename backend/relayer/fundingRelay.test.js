@@ -2,8 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { scanAndApply } from "./fundingRelay.js";
+import { normalizePrivateKey } from "./config.js";
 
 const logger = { info() {}, warn() {}, error() {} };
+
+test("normalizes secret-manager private keys for both ethers and GenLayer", () => {
+  assert.equal(normalizePrivateKey("ab"), "0xab");
+  assert.equal(normalizePrivateKey("0xab"), "0xab");
+});
 
 test("durably queues and retries an interrupted GenLayer acknowledgement", async () => {
   const state = {};
@@ -81,10 +87,10 @@ test("a poison deposit does not prevent discovery and application of later range
   };
 
   await scanAndApply(logger, deps);
-  assert.equal(state["fundingRelay:lastScannedBlock"], "2000");
+  assert.equal(state["fundingRelay:lastScannedBlock"], "199");
   head = 4105;
   const second = await scanAndApply(logger, deps);
-  assert.equal(state["fundingRelay:lastScannedBlock"], "4001");
+  assert.equal(state["fundingRelay:lastScannedBlock"], "399");
   assert.deepEqual(acknowledged, ["2"]);
   assert.equal(second.pending, 1, "only the poison deposit remains queued");
 });

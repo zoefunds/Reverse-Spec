@@ -23,7 +23,7 @@ const ESCROW_ABI = [
 ];
 const LAST_BLOCK_KEY = "fundingRelay:lastScannedBlock";
 const PENDING_KEY = "fundingRelay:pendingDeposits";
-const MAX_BLOCK_RANGE = 2000; // stay well under typical RPC log-range caps
+const MAX_BLOCK_RANGE = 199; // Base public RPC rejects ranges wider than 200 blocks
 
 export const fundingRelayState = {
   lastTickAt: null,

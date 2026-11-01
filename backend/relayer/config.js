@@ -1,5 +1,9 @@
 import "dotenv/config";
 
+export function normalizePrivateKey(key = "") {
+  return key && !key.startsWith("0x") ? `0x${key}` : key;
+}
+
 /** Central, validated configuration for the relayer. Fails loudly on
  * missing critical vars rather than silently no-op'ing a poll loop. */
 export const config = {
@@ -19,7 +23,9 @@ export const config = {
     // contract's trusted `relayer` (record_funding()/mark_settled()) — one
     // operational identity that only ever acts on deposits/outcomes it has
     // independently confirmed on-chain.
-    relayerPrivateKey: process.env.BASE_SEPOLIA_RELAYER_PRIVATE_KEY ?? "",
+    relayerPrivateKey: normalizePrivateKey(
+      process.env.BASE_SEPOLIA_RELAYER_PRIVATE_KEY ?? "",
+    ),
     // Blocks to wait behind the chain head before treating a `Funded`
     // deposit as final.
     confirmations: parseInt(
