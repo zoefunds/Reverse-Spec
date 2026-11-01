@@ -14,21 +14,22 @@ AI-validator consensus, not by any company or server.
 |---|---|
 | Frontend | https://reverse-spec.vercel.app |
 | Backend API | https://reverse-spec-production-api.fly.dev (`/healthz` for status) |
-| Contract (StudioNet) | `0x185cE8fff49fe93f57635aB03FC19B9e5d3D04e6` |
-| Escrow (Base Sepolia) | `0x8e07D1aE543c489D64E368A579Ac28cF8b541256` |
+| Contract (StudioNet) | `0x75B9094aCd67bfC450B07fFA07A63b2446260Eaf` |
+| Escrow (Base Sepolia) | `0x7e83C2136f9C6e259187E737501086bc84EC0595` |
 | Repo | https://github.com/zoefunds/Reverse-Spec |
 
 **Current production design:** real value moves in USDC on a Base Sepolia escrow contract
 (`contracts/base/ReverseSpecEscrow.sol`, deployed at
-`0x8e07D1aE543c489D64E368A579Ac28cF8b541256`), not in native GEN inside the
+`0x7e83C2136f9C6e259187E737501086bc84EC0595`), not in native GEN inside the
 GenLayer contract. See "Why this needs GenLayer" and
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) below for the current design.
 
-The complete production path was proven live on 2026-11-01: a real 5 USDC
-deposit was observed through durable historical replay, acknowledged on
-GenLayer, evaluated by consensus, automatically settled on Base, and claimed
-as 4.75 USDC by the winner and 0.25 USDC by the creator. Transaction evidence
-is recorded in [remediation-milestone.md](remediation-milestone.md).
+The complete payment path was proven live on 2026-11-01 with a real 5 USDC
+consensus run. After the atomic funding-activation upgrade, the current
+coordinated pair was separately proven with a real 1 USDC
+commitment/acknowledgement/activation/cancellation/settlement/claim smoke.
+Transaction evidence for both runs is recorded in
+[remediation-milestone.md](remediation-milestone.md).
 
 ## Why this needs GenLayer
 
@@ -46,8 +47,9 @@ is recorded in [remediation-milestone.md](remediation-milestone.md).
   GenLayer contract does judging only — it decides who gets what and
   exposes that decision via `get_base_payouts` for a relayer to execute as
   a real `settle()`/`claim()` on Base. Creator funds via `fund(bountyId,
-  amount)`; the relayer confirms the deposit on GenLayer via
-  `record_funding`, which is what actually opens the bounty. A strict
+  amount)`; the relayer records a non-active GenLayer commitment, acknowledges
+  the deposit on Base, then calls `activate_funding`, which actually opens the
+  bounty. A strict
   conservation invariant (`check_escrow_invariant`: tracked open escrow ==
   sum of every live bounty's `reward_escrow`) is queryable on-chain and
   polled by the backend indexer.
@@ -77,7 +79,8 @@ PostgreSQL (read-model: search, leaderboards, profiles)     │
 
 GenLayer judges, Base Sepolia custodies. The GenLayer contract never holds
 funds; `backend/relayer/` bridges the two chains (`fundingRelay.js` watches
-Base `Funded` events and calls `record_funding` on GenLayer;
+Base `Funded` events and runs `record_funding` → Base acknowledgement →
+`activate_funding` on GenLayer;
 `payoutRelay.js` reads `get_base_payouts` on GenLayer, calls
 `escrow.settle()` on Base, then calls `mark_settled` back on GenLayer).
 
@@ -86,7 +89,7 @@ Base `Funded` events and calls `record_funding` on GenLayer;
   judging/consensus, and payout instructions (no fund custody).
 - **Base Sepolia escrow** ([contracts/base/ReverseSpecEscrow.sol](contracts/base/ReverseSpecEscrow.sol)) —
   holds the real USDC (`fund`, `settle` (relayer-only), `claim`); deployed
-  at `0x8e07D1aE543c489D64E368A579Ac28cF8b541256`.
+  at `0x7e83C2136f9C6e259187E737501086bc84EC0595`.
 - **Backend** ([backend/](backend/)) — wallet-signature auth (SIWE-style),
   mirror API, chain indexer, health checks. Runs 24/7 on Fly.io across 2
   machines (`auto_stop=off`, `min_machines_running=1`, health-check
@@ -119,7 +122,7 @@ npm run dev   # http://localhost:3000
 # contract lint + schema validation
 .venv/bin/genvm-lint check contracts/reverse_spec_bounties.py --json
 
-# contract direct tests (51) — covers PENDING_FUNDING/record_funding,
+# contract direct tests (52) — covers commitment/activation/void funding,
 # submission-window/abandonment-recovery gating, and the tightened
 # consensus tolerances
 .venv/bin/pytest contracts-tests/direct/ -v
@@ -127,10 +130,10 @@ npm run dev   # http://localhost:3000
 # backend API tests (13)
 (cd backend && ../.venv/bin/pytest tests/ -v)
 
-# relayer durability and normalization tests (4)
+# relayer durability, receipt-execution, and refund-race tests (7)
 (cd backend/relayer && npm test)
 
-# Base escrow lifecycle tests (3)
+# Base escrow lifecycle tests (4)
 (cd contracts/base && forge test)
 
 # frontend type-check + build
@@ -139,6 +142,9 @@ npm run dev   # http://localhost:3000
 # full live payment path; requires secret-injected creator/solver keys,
 # test USDC and gas, and waits through the one-hour protocol floor
 (cd backend/relayer && npm run e2e:payment)
+
+# faster live funding/activation/refund smoke (real 1 USDC by default)
+(cd backend/relayer && npm run e2e:funding-smoke)
 ```
 
 ## Documentation

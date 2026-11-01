@@ -24,9 +24,11 @@ the actual USDC.
 | Fly API app | `reverse-spec-production-api` (2 machines, `iad`) |
 | Fly relayer app | `reverse-spec-production-relayer` (persistent volume, `iad`) |
 | Fly Postgres | `reverse-spec-production-db` |
-| GenLayer StudioNet contract | `0x185cE8fff49fe93f57635aB03FC19B9e5d3D04e6` |
-| Base Sepolia escrow | `0x8e07D1aE543c489D64E368A579Ac28cF8b541256` |
-| Escrow deployment block | `52994901` |
+| GenLayer StudioNet contract | `0x75B9094aCd67bfC450B07fFA07A63b2446260Eaf` |
+| GenLayer deployment tx | `0xff3f9fba5dcbdd9dc53f570032429b386a192b05f05988867bf02609a396b5c5` |
+| Base Sepolia escrow | `0x7e83C2136f9C6e259187E737501086bc84EC0595` |
+| Escrow deployment block | `53031221` |
+| Escrow deployment tx | `0x2d7334ce6c5e834e10d4c52bfe45490942e5e2a0f1f3c41d5474d5e06eab051c` |
 | Base Sepolia USDC | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` |
 | Owner/relayer address | `0x7401c129EDfc26E68FE19309fE461eb3Db1058Eb` |
 
@@ -38,8 +40,9 @@ the actual USDC.
   per-deposit acknowledgment/refund state, settlement, and claims.
 - The Node relayer is a standing, owner-rotatable bridge. Funding events enter
   an atomic persistent queue before the scan cursor advances. Each deposit
-  retries independently across restarts until both GenLayer recording and Base
-  acknowledgment succeed.
+  retries independently across restarts through GenLayer commitment, Base
+  acknowledgment, and GenLayer activation. ACCEPTED transactions count only
+  when the leader execution receipt reports `SUCCESS`.
 - Creation uses a unique `creation_ref`; the UI resolves the exact bounty from
   that reference. `record_funding` rejects a funder other than the creator.
 - An unacknowledged deposit can be refunded after seven days. Acknowledged
@@ -54,29 +57,32 @@ the actual USDC.
 
 1. `create_bounty(..., creation_ref)` creates `PENDING_FUNDING`.
 2. The creator approves USDC and calls `fund()` on Base.
-3. The relayer observes the confirmed `Funded` event, calls `record_funding`,
-   and then `acknowledgeDeposit`; the bounty becomes `OPEN`.
-4. Solvers submit public evidence. The enforced submission window must expire
+3. The relayer observes the confirmed `Funded` event and calls
+   `record_funding`; the bounty becomes non-active `FUNDING_COMMITTED`.
+4. The relayer calls Base `acknowledgeDeposit`, then `activate_funding`; only
+   then does the bounty become `OPEN`. A Base refund instead triggers
+   `void_funding`, so the refund race cannot leave an active unbacked reward.
+5. Solvers submit public evidence. The enforced submission window must expire
    before either creator or solver abandonment-recovery closure can occur.
-5. Independent validators evaluate fetched evidence. Eligible results are
+6. Independent validators evaluate fetched evidence. Eligible results are
    ranked deterministically and finalized with an 85/10/5 allocation; a sole
    eligible winner receives the absent runner-up share (95/5).
-6. The relayer reads `get_base_payouts`, calls Base `settle()`, and confirms
+7. The relayer reads `get_base_payouts`, calls Base `settle()`, and confirms
    `mark_settled`. Recipients pull USDC with `claim()`.
 
 ## Verification baseline
 
-- 51 Intelligent Contract direct tests.
+- 52 Intelligent Contract direct tests.
 - 13 backend API tests.
-- 4 relayer tests, including interrupted acknowledgment replay, poison-event
-  isolation, private-key normalization, and nested GenLayer result
-  normalization for payout discovery.
-- 3 Foundry escrow lifecycle tests.
+- 7 relayer tests, including ACCEPTED-with-failed-execution rejection,
+  interrupted acknowledgment replay, poison-event isolation, and the seven-day
+  refund race.
+- 4 Foundry escrow lifecycle tests.
 - Next.js production build passes.
 - Live API health reports database and indexer healthy.
-- Live bounty 1 completed the full real payment path on 2026-11-01:
-  5 USDC deposit → automatic acknowledgment → consensus → automatic Base
-  settlement → 4.75 USDC winner claim + 0.25 USDC creator claim.
+- Live bounty 1 on the current deployment completed the fast real-value smoke:
+  1 USDC deposit → commitment → automatic Base acknowledgement → activation →
+  cancellation → automatic Base settlement → 1 USDC creator claim.
 
 ## Security incident closure
 

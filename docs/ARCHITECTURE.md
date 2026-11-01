@@ -10,7 +10,7 @@ Current production endpoints and addresses are maintained in
 |---|---|---|
 | Intelligent Contract (GenLayer StudioNet) | Bounty lifecycle, submissions, LLM evaluations, payout *decisions* | Source of truth for judging — consensus-verified; holds no funds |
 | ReverseSpecEscrow.sol (Base Sepolia) | USDC custody — `fund`, `settle`, `claim` | Source of truth for *funds*; executes payout instructions relayed from GenLayer |
-| backend/relayer/ (Node) | Bridges the two chains: watches Base `Funded` events → `record_funding` on GenLayer; reads `get_base_payouts` → `settle()` on Base → `mark_settled` on GenLayer | Trusted relayer identity (owner-rotatable via `set_relayer`); moves no judgment, only confirmed events |
+| backend/relayer/ (Node) | Bridges funding with `record_funding` → Base acknowledgement → `activate_funding`; relays payouts with `settle()` → `mark_settled` | Trusted relayer identity (owner-rotatable via `set_relayer`); moves no judgment, only confirmed events |
 | FastAPI backend (Fly.io) | Auth sessions, search/filter read-model, indexer, monitoring | Untrusted cache; self-heals from chain |
 | PostgreSQL | Mirrors + users/profiles + audit log | Rebuildable from chain state |
 | Next.js frontend (Vercel) | UI; signs all transactions client-side | Holds no secrets, no keys |
@@ -31,11 +31,14 @@ arbitrary external chain), so custody is split from judgment:
 - **Bridge** (`backend/relayer/`, a Node service): the single trusted
   relayer address bridges both directions. `fundingRelay.js` watches
   Base's `Funded` event and calls `record_funding(bounty_id, funder,
-  amount, base_tx_hash)` on GenLayer, which credits the bounty and flips
-  it OPEN once the deposit clears `MIN_BOUNTY_ESCROW` (1.00 USDC).
+  amount, base_tx_hash)` on GenLayer, which creates a non-active
+  `FUNDING_COMMITTED` record. It then acknowledges the Base deposit and calls
+  `activate_funding`, which alone credits and opens the bounty once the deposit
+  clears `MIN_BOUNTY_ESCROW` (1.00 USDC). If the seven-day Base refund wins the
+  race, `void_funding` returns the shell to `PENDING_FUNDING` instead.
   `payoutRelay.js` reads `get_base_payouts`, calls `escrow.settle()` on
   Base, then confirms with `mark_settled(bounty_id, base_tx_hash)` on
-  GenLayer. Both GenLayer-side confirmations are idempotent on
+  GenLayer. All GenLayer-side confirmations are idempotent on
   `base_tx_hash` so a retried relay can never double-count.
 
 Money can only move through the escrow contract, driven by relayer-relayed,
@@ -48,24 +51,27 @@ the backend cannot spend on either chain.
    `PENDING_FUNDING` bounty shell with a chosen `submission_window_secs`.
 2. Creator funds on Base Sepolia: `ReverseSpecEscrow.fund(bountyId,
    amount)` (USDC, 6 decimals; wallet must `approve` first).
-3. Relayer confirms: `record_funding` credits `reward_escrow` and flips
-   the bounty OPEN once `amount >= MIN_BOUNTY_ESCROW` (1.00 USDC),
-   stamping `submission_deadline = opened_at + submission_window_secs`.
-4. `finalize_bounty`: consensus verdict splits escrow into `claimable`
+3. Relayer commits: `record_funding` validates creator/funder identity and
+   stores the deposit while the bounty remains non-active.
+4. Relayer acknowledges the Base deposit, making it non-refundable, then
+   `activate_funding` credits escrow and opens the bounty. If Base reports the
+   deposit refunded first, `void_funding` removes the commitment. Thus an
+   outage can delay activation but cannot produce an active unbacked bounty.
+5. `finalize_bounty`: consensus verdict splits escrow into `claimable`
    ledger credits — 85% winner / 10% runner-up (absorbed by winner if
    none) / 5% creator reserve. Only submissions whose evaluation has
    `evidence_fetch_ok == True` are eligible to become winner/runner-up —
    an unverifiable claim can be ranked and shown but never paid.
    Pull-pattern, checks-effects-interactions.
-5. `get_base_payouts(bounty_id)` (view): the relayer reads unsettled
+6. `get_base_payouts(bounty_id)` (view): the relayer reads unsettled
    `{recipient, amount}` allocations and executes `escrow.settle()` on
    Base, then confirms with `mark_settled` — the terminal leg. GenLayer
    itself never sends value; `claim_rewards` no longer exists on the
    GenLayer contract, and `claim(bountyId)` on the Base escrow is how
    value actually reaches a wallet.
-6. `cancel_bounty` / `reclaim_escrow`: refund paths for no-takers /
+7. `cancel_bounty` / `reclaim_escrow`: refund paths for no-takers /
    below-bar outcomes, credited the same way and relayed to Base.
-7. `check_escrow_invariant` (view): the GenLayer contract holds no funds,
+8. `check_escrow_invariant` (view): the GenLayer contract holds no funds,
    so this checks internal ledger self-consistency — tracked
    `total_open_escrow` must equal the sum of every live bounty's
    `reward_escrow` — rather than a real token balance. Polled by the
@@ -95,11 +101,14 @@ The evaluation runs as a custom leader/validator nondet block:
 
 Funding scanning is acknowledgment-aware. Each discovered event is atomically
 written to a durable pending queue together with the scan cursor before the
-cursor can advance. Pending events retry independently until GenLayer recording
-and Base acknowledgement both succeed, so one poison deposit cannot block later
-ranges. A funder can recover an
-unacknowledged mistaken deposit after the seven-day safety delay, while an
-acknowledged deposit can no longer be refunded.
+cursor can advance. Pending events retry independently through GenLayer
+commitment, Base acknowledgement, and GenLayer activation, so one poison
+deposit cannot block later ranges. An ACCEPTED GenLayer transaction counts only
+when its leader execution receipt reports `SUCCESS`; a contract rollback stays
+queued. A funder can recover an unacknowledged mistaken deposit after seven
+days, and the relayer then voids any GenLayer commitment. Once Base
+acknowledgement wins, refund is impossible and activation remains durably
+retryable.
 
 ## Auth flow
 

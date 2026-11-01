@@ -91,10 +91,10 @@ acting in good faith to pay out.
   indexer), deployed 24/7 on Fly.io
 - `frontend/` — Next.js app (all pages listed below), deployed on Vercel
 - `backend/relayer/` — durable Base↔GenLayer funding and payout relay
-- `contracts-tests/` — 51 direct Intelligent Contract tests
+- `contracts-tests/` — 52 direct Intelligent Contract tests
 - `docs/` — architecture, API, contract reference, deployment guide
 - `MEMORY.md` — concise current deployment and architecture record
 
-Live: GenLayer contract `0x185cE8fff49fe93f57635aB03FC19B9e5d3D04e6`,
-Base escrow `0x8e07D1aE543c489D64E368A579Ac28cF8b541256`, frontend on Vercel, and
+Live: GenLayer contract `0x75B9094aCd67bfC450B07fFA07A63b2446260Eaf`,
+Base escrow `0x7e83C2136f9C6e259187E737501086bc84EC0595`, frontend on Vercel, and
 replacement backend/relayer apps on Fly.io — see [README.md](README.md).

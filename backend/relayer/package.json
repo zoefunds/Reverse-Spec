@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node index.js",
     "test": "node --test",
+    "e2e:funding-smoke": "node e2e.funding-smoke.js",
     "e2e:payment": "node e2e.payment-path.js",
     "deploy:genlayer": "node deploy-genlayer.js"
   },

@@ -2,7 +2,7 @@
 
 ## Contract (GenLayer StudioNet)
 
-Production contract: `0x185cE8fff49fe93f57635aB03FC19B9e5d3D04e6`.
+Production contract: `0x75B9094aCd67bfC450B07fFA07A63b2446260Eaf`.
 
 This is the coordinated acknowledgment/recovery deployment. The constructor
 set both `owner` and `relayer` to the deploying address; the Base escrow below
@@ -23,10 +23,10 @@ redeploying.
 deployed before the GenLayer contract goes live, since the GenLayer side
 needs a `relayer` address that matches the escrow's `relayer`. It's
 already deployed for this project at
-`0x8e07D1aE543c489D64E368A579Ac28cF8b541256` on Base Sepolia (USDC token
+`0x7e83C2136f9C6e259187E737501086bc84EC0595` on Base Sepolia (USDC token
 `0x036CbD53842c5426634e7929541eC2318f3dCF7e`, relayer/owner
 `0x7401c129EDfc26E68FE19309fE461eb3Db1058Eb`), deployed at Base block
-`52994901`. Redeploy only if you need a fresh instance.
+`53031221`. Redeploy only if you need a fresh instance.
 
 ```bash
 cd contracts/base
@@ -59,12 +59,15 @@ on each side.
 After deploying, configure `backend/relayer/` (`fundingRelay.js` /
 `payoutRelay.js`) with the escrow address, the GenLayer contract address,
 and the relayer private key so it can bridge `Funded` events into
-`record_funding` and `get_base_payouts` into `settle()`/`mark_settled`.
+`record_funding` → Base acknowledgement → `activate_funding`, and bridge
+`get_base_payouts` into `settle()` → `mark_settled`.
 
 Set `BASE_SEPOLIA_FUNDING_START_BLOCK` to the escrow deployment block. With no
 stored cursor the relayer replays from that block. Each scan atomically persists
-new pending events with its cursor; pending acknowledgements retry independently
-across restarts and cannot be skipped or stall discovery of later ranges.
+new pending events with its cursor; commitment, acknowledgement, and activation
+retry independently across restarts and cannot be skipped or stall discovery
+of later ranges. An ACCEPTED GenLayer transaction is complete only when its
+leader execution receipt reports `SUCCESS`.
 
 ## Real payment-path regression
 
@@ -79,6 +82,11 @@ manager.
 The production run completed successfully for bounty `1`; its Base funding,
 settlement, and claim transaction hashes are recorded in
 [`../remediation-milestone.md`](../remediation-milestone.md).
+
+For a faster real-value deployment check, run `npm run e2e:funding-smoke`. It
+uses 1 USDC by default and proves creation, automatic three-phase activation,
+cancellation, automatic settlement, and final claim without waiting through
+the submission window.
 
 ## Backend — Fly.io (24/7)
 

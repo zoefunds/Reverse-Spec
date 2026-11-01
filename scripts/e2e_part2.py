@@ -11,7 +11,7 @@ from genlayer_py import create_account, create_client
 from genlayer_py.chains import studionet
 from genlayer_py.types import TransactionStatus
 
-CONTRACT = "0x185cE8fff49fe93f57635aB03FC19B9e5d3D04e6"
+CONTRACT = "0x75B9094aCd67bfC450B07fFA07A63b2446260Eaf"
 USDC = 10**6
 keys = {name: os.environ.get(f"E2E_{name.upper()}_PRIVATE_KEY", "")
         for name in ("creator", "solver_a", "solver_b")}

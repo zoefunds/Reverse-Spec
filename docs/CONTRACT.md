@@ -3,9 +3,9 @@
 File: `contracts/reverse_spec_bounties.py` (single production contract,
 pinned `py-genlayer` runner, genvm-lint clean, ~1,650 lines).
 
-Production StudioNet address: `0x185cE8fff49fe93f57635aB03FC19B9e5d3D04e6`.
+Production StudioNet address: `0x75B9094aCd67bfC450B07fFA07A63b2446260Eaf`.
 Paired Base Sepolia escrow:
-`0x8e07D1aE543c489D64E368A579Ac28cF8b541256`.
+`0x7e83C2136f9C6e259187E737501086bc84EC0595`.
 
 ## Split custody (read this first)
 
@@ -13,8 +13,9 @@ As of v1, this contract **never holds funds**. Funding is USDC (6 decimals)
 held in `contracts/base/ReverseSpecEscrow.sol` on Base Sepolia. This
 contract judges submissions and decides payouts; a trusted relayer
 (`owner`/`relayer` state, rotatable via `set_relayer`) bridges the two
-chains by calling `record_funding` (Base deposit confirmed → open the
-bounty) and `mark_settled` (Base `settle()` confirmed → close out the
+chains by calling `record_funding` (store a non-active commitment),
+`activate_funding` (Base acknowledgement confirmed → open the bounty), and
+`mark_settled` (Base `settle()` confirmed → close out the
 ledger). See [ARCHITECTURE.md](ARCHITECTURE.md) for the full flow.
 
 ## Writes
@@ -22,7 +23,9 @@ ledger). See [ARCHITECTURE.md](ARCHITECTURE.md) for the full flow.
 | Method | Who | Effect |
 |---|---|---|
 | `create_bounty(..., submission_window_secs, creation_ref)` | anyone | Creates a `PENDING_FUNDING` shell. The unique reference resolves through `get_bounty_id_by_creation_ref`, binding this creation transaction to the later deposit without a global counter. |
-| `record_funding(bounty_id, funder, amount, base_tx_hash)` | relayer only | Idempotently confirms a Base deposit and rejects any funder other than the bounty creator. Opens the bounty once the minimum is met. |
+| `record_funding(bounty_id, funder, amount, base_tx_hash)` | relayer only | Idempotently records a non-active Base funding commitment and rejects any funder other than the creator. |
+| `activate_funding(bounty_id, base_tx_hash)` | relayer only | After Base acknowledgement, credits escrow and opens the committed bounty. |
+| `void_funding(bounty_id, base_tx_hash)` | relayer only | After a Base refund, removes the commitment and restores `PENDING_FUNDING`. |
 | `cancel_bounty(id)` | creator | Refund if zero live submissions (works from `PENDING_FUNDING` or `OPEN`) |
 | `close_submissions(id)` | creator, or any solver with a live submission | OPEN → EVALUATING (abandonment recovery); reverts until `submission_deadline` has elapsed, for both paths |
 | `submit_solution(bounty_id, title, rationale, evidence_url)` | solver | Registers solution (https evidence required) |
@@ -44,8 +47,9 @@ GenLayer.
 `get_solver_stats(address)`, `get_leaderboard(top_n)`,
 `get_reward_history(address, limit)`, `get_platform_stats`,
 `get_audit_page(offset, limit)`, `check_escrow_invariant`, `get_config`,
-`get_base_payouts(bounty_id)` (new — unsettled `[{recipient, amount}]`
+`get_base_payouts(bounty_id)` (unsettled `[{recipient, amount}]`
 allocations for the relayer to settle on Base Sepolia).
+`get_pending_funding(bounty_id)` exposes the current non-active commitment.
 
 `check_escrow_invariant` no longer checks a real balance (the contract
 holds no funds): it returns `tracked_open_escrow` / `summed_bounty_escrow`

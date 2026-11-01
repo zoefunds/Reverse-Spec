@@ -24,10 +24,10 @@ and transaction hashes are in
 
 | Component | Value |
 |---|---|
-| GenLayer StudioNet contract | `0x185cE8fff49fe93f57635aB03FC19B9e5d3D04e6` |
-| Base Sepolia escrow | `0x8e07D1aE543c489D64E368A579Ac28cF8b541256` |
+| GenLayer StudioNet contract | `0x75B9094aCd67bfC450B07fFA07A63b2446260Eaf` |
+| Base Sepolia escrow | `0x7e83C2136f9C6e259187E737501086bc84EC0595` |
 | Base Sepolia USDC | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` |
-| Escrow deployment block | `52994901` |
+| Escrow deployment block | `53031221` |
 | Frontend | `https://reverse-spec.vercel.app` |
 | API | `https://reverse-spec-production-api.fly.dev` |
 | Fly API app | `reverse-spec-production-api` |
@@ -41,5 +41,5 @@ settlement identifiers: 5 USDC was deposited on Base, automatically
 acknowledged on GenLayer, evaluated by consensus, automatically settled on
 Base, and claimed as 4.75 USDC by the sole winner and 0.25 USDC by the creator.
 
-Verification baseline: 51 contract tests, 13 backend tests, 4 relayer tests, 3
+Verification baseline: 52 contract tests, 13 backend tests, 7 relayer tests, 4
 Foundry escrow tests, and a successful frontend production build.

@@ -4,14 +4,14 @@ export const CONFIG = {
   apiBase:
     process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000/api/v1",
   contractAddress: (process.env.NEXT_PUBLIC_CONTRACT_ADDRESS ??
-    "0x185cE8fff49fe93f57635aB03FC19B9e5d3D04e6") as `0x${string}`,
+    "0x75B9094aCd67bfC450B07fFA07A63b2446260Eaf") as `0x${string}`,
   network: process.env.NEXT_PUBLIC_GENLAYER_NETWORK ?? "studionet",
   /** Base Sepolia — where bounty funding/claims actually move USDC. */
   baseChainId: 84532,
   usdcAddress: (process.env.NEXT_PUBLIC_USDC_ADDRESS ??
     "0x036CbD53842c5426634e7929541eC2318f3dCF7e") as `0x${string}`,
   escrowAddress: (process.env.NEXT_PUBLIC_ESCROW_ADDRESS ??
-    "0x8e07D1aE543c489D64E368A579Ac28cF8b541256") as `0x${string}`,
+    "0x7e83C2136f9C6e259187E737501086bc84EC0595") as `0x${string}`,
 } as const;
 
 /**
