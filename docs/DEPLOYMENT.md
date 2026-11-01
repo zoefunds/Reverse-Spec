@@ -4,11 +4,9 @@
 
 Production contract: `0x185cE8fff49fe93f57635aB03FC19B9e5d3D04e6`.
 
-The current acknowledgment/recovery revision requires a fresh coordinated
-deploy — the constructor sets both `owner` and `relayer` to the
-deploying address, so **deploy the Base Sepolia escrow first** (below),
-then deploy this contract from the same relayer key so the two sides agree
-on who the relayer is.
+This is the coordinated acknowledgment/recovery deployment. The constructor
+set both `owner` and `relayer` to the deploying address; the Base escrow below
+uses the same operational identity.
 
 To (re)deploy: open [studio.genlayer.com](https://studio.genlayer.com),
 paste `contracts/reverse_spec_bounties.py`, deploy with no constructor args
@@ -27,9 +25,8 @@ needs a `relayer` address that matches the escrow's `relayer`. It's
 already deployed for this project at
 `0x8e07D1aE543c489D64E368A579Ac28cF8b541256` on Base Sepolia (USDC token
 `0x036CbD53842c5426634e7929541eC2318f3dCF7e`, relayer/owner
-`0x7401c129EDfc26E68FE19309fE461eb3Db1058Eb`) — redeploy only if you need a
-fresh instance (the current source adds per-deposit acknowledgement and timed
-refunds, so this redeploy is mandatory for the remediation milestone).
+`0x7401c129EDfc26E68FE19309fE461eb3Db1058Eb`), deployed at Base block
+`52994901`. Redeploy only if you need a fresh instance.
 
 ```bash
 cd contracts/base
@@ -37,7 +34,7 @@ npm install   # solc + ethers, if not already present
 BASE_SEPOLIA_RPC_URL="https://..." \
 BASE_SEPOLIA_RELAYER_PRIVATE_KEY="0x..." \
 BASE_SEPOLIA_USDC_ADDRESS="0x036CbD53842c5426634e7929541eC2318f3dCF7e" \
-  node contracts/base/deploy.js
+  node deploy.js
 ```
 
 Required env vars:
@@ -53,7 +50,7 @@ project), deploys with `ethers`, and writes the ABI to
 
 Because the same relayer private key must sign both sides, the address
 that comes out of this deploy becomes **both** the escrow's `relayer` on
-Base Sepolia **and**, once you redeploy `reverse_spec_bounties.py` from
+Base Sepolia **and**, once you deploy `reverse_spec_bounties.py` from
 that same key, the GenLayer contract's `owner`/`relayer` — the deployer
 becomes both at GenLayer contract construction. Keep the two deploys using
 the same key, or reconcile them afterwards with `set_relayer`/`setRelayer`
@@ -83,14 +80,14 @@ manager.
 
 ```bash
 cd backend
-fly launch --no-deploy --copy-config --name reverse-spec-api   # first time
-fly postgres create --name reverse-spec-db                     # managed PG
-fly postgres attach reverse-spec-db                            # sets DATABASE_URL
+fly launch --no-deploy --copy-config --name reverse-spec-production-api
+fly postgres create --name reverse-spec-production-db
+fly postgres attach reverse-spec-production-db -a reverse-spec-production-api
 # convert DATABASE_URL to the SQLAlchemy driver form:
 fly secrets set DATABASE_URL="postgresql+psycopg://<user>:<pass>@<host>/<db>"
 fly secrets set JWT_SECRET="$(openssl rand -hex 32)"
 fly secrets set CORS_ORIGINS="https://<your-vercel-domain>"
-fly deploy
+fly deploy -a reverse-spec-production-api
 ```
 
 The 24/7 guarantees live in `fly.toml`:
@@ -111,7 +108,7 @@ Operations:
 ```bash
 cd frontend
 vercel link
-vercel env add NEXT_PUBLIC_API_BASE production      # https://reverse-spec-api.fly.dev/api/v1
+vercel env add NEXT_PUBLIC_API_BASE production      # https://reverse-spec-production-api.fly.dev/api/v1
 vercel env add NEXT_PUBLIC_CONTRACT_ADDRESS production
 vercel env add NEXT_PUBLIC_GENLAYER_NETWORK production   # studionet
 vercel --prod

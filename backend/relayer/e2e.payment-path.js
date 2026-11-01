@@ -32,8 +32,11 @@ const ESCROW = [
 ];
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+function normalizedKey(key) {
+  return key.startsWith("0x") ? key : `0x${key}`;
+}
 function glClient(key) {
-  return createClient({ chain: studionet, account: createAccount(key) });
+  return createClient({ chain: studionet, account: createAccount(normalizedKey(key)) });
 }
 async function write(client, functionName, args) {
   const hash = await client.writeContract({ address: config.genlayerContractAddress, functionName, args, value: 0n });
@@ -41,7 +44,15 @@ async function write(client, functionName, args) {
   return hash;
 }
 async function read(client, functionName, args = []) {
-  return client.readContract({ address: config.genlayerContractAddress, functionName, args, stateStatus: "accepted" });
+  return plain(await client.readContract({ address: config.genlayerContractAddress, functionName, args, stateStatus: "accepted" }));
+}
+function plain(value) {
+  if (value instanceof Map) return Object.fromEntries([...value].map(([key, item]) => [key, plain(item)]));
+  if (Array.isArray(value)) return value.map(plain);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, plain(item)]));
+  }
+  return value;
 }
 async function poll(label, fn, timeoutMs = 15 * 60_000) {
   const end = Date.now() + timeoutMs;
@@ -56,31 +67,37 @@ async function poll(label, fn, timeoutMs = 15 * 60_000) {
 const creator = glClient(creatorKey);
 const solver = glClient(solverKey);
 const base = new JsonRpcProvider(config.baseSepolia.rpcUrl);
-const creatorWallet = new Wallet(creatorKey, base);
-const solverWallet = new Wallet(solverKey, base);
+const creatorWallet = new Wallet(normalizedKey(creatorKey), base);
+const solverWallet = new Wallet(normalizedKey(solverKey), base);
 const usdc = new Contract(config.baseSepolia.usdcAddress, USDC, creatorWallet);
 const escrowCreator = new Contract(config.baseSepolia.escrowAddress, ESCROW, creatorWallet);
 const escrowSolver = new Contract(config.baseSepolia.escrowAddress, ESCROW, solverWallet);
 
-const creationRef = `${creatorWallet.address.toLowerCase()}:${randomUUID()}`;
-await write(creator, "create_bounty", [
-  "Real cross-chain payment-path regression",
-  "Build and verify the complete Base USDC to GenLayer adjudication and Base claim workflow without synthetic relay identifiers.",
-  "The test must prove durable cross-chain acknowledgements and real custody movement.",
-  "Protocol", "e2e,base,usdc,consensus", new Date().toISOString(), "one-hour-window", 3600, creationRef,
-]);
-const bountyId = Number(await read(creator, "get_bounty_id_by_creation_ref", [creationRef]));
-if (!bountyId) throw new Error("creation reference did not resolve");
-
 const amount = 5_000_000n;
-const depositId = (await escrowCreator.depositSeq()) + 1n;
-await (await usdc.approve(config.baseSepolia.escrowAddress, amount)).wait();
-await (await escrowCreator.fund(bountyId, amount)).wait();
+let bountyId = Number(process.env.E2E_RESUME_BOUNTY_ID ?? 0);
+let depositId = BigInt(process.env.E2E_RESUME_DEPOSIT_ID ?? 0);
+if (!bountyId) {
+  const creationRef = `${creatorWallet.address.toLowerCase()}:${randomUUID()}`;
+  await write(creator, "create_bounty", [
+    "Real cross-chain payment-path regression",
+    "Build and verify the complete Base USDC to GenLayer adjudication and Base claim workflow without synthetic relay identifiers.",
+    "The test must prove durable cross-chain acknowledgements and real custody movement.",
+    "Protocol", "e2e,base,usdc,consensus", new Date().toISOString(), "one-hour-window", 3600, creationRef,
+  ]);
+  bountyId = Number(await read(creator, "get_bounty_id_by_creation_ref", [creationRef]));
+  if (!bountyId) throw new Error("creation reference did not resolve");
+  depositId = (await escrowCreator.depositSeq()) + 1n;
+  await (await usdc.approve(config.baseSepolia.escrowAddress, amount)).wait();
+  await (await escrowCreator.fund(bountyId, amount)).wait();
+} else if (!depositId) {
+  throw new Error("E2E_RESUME_DEPOSIT_ID is required when resuming a bounty");
+}
 await poll("automatic funding acknowledgement", async () => {
   const bounty = await read(creator, "get_bounty", [bountyId]);
   const deposit = await escrowCreator.deposits(depositId);
-  return bounty.status === "OPEN" && deposit.acknowledged;
+  return bounty.status === "OPEN" && Boolean(deposit.acknowledged ?? deposit[4]);
 });
+console.log(`funding acknowledged: bounty=${bountyId} deposit=${depositId}`);
 
 const submissionId = await write(solver, "submit_solution", [
   bountyId, "Executable evidence for the real payment path",

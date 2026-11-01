@@ -231,13 +231,13 @@ three bounties in correct terminal states (`RESOLVED`, `CANCELLED`,
 
 ## 7. Deployment/ops summary
 
-- Backend (Fly.io, `reverse-spec-bounties-api`): `GENLAYER_CONTRACT_ADDRESS`
+- Backend (Fly.io, `reverse-spec-production-api`): `GENLAYER_CONTRACT_ADDRESS`
   updated to the final contract; DB migration `0002_submission_window`
   applied via `release_command`.
 - Frontend (Vercel, `reverse-spec.vercel.app`): `NEXT_PUBLIC_CONTRACT_ADDRESS`
   and `NEXT_PUBLIC_ESCROW_ADDRESS` updated; redeployed to production.
 - `backend/relayer/` is deployed as its own standing Fly.io app
-  (`reverse-spec-relayer`, `always`-restart policy, no HTTP surface — a
+  (`reverse-spec-production-relayer`, `always`-restart policy, no HTTP surface — a
   pure background poller) with `BASE_SEPOLIA_RELAYER_PRIVATE_KEY` set as
   a secret. It runs the funding relay (30s poll, 15s floor) and payout
   relay (30s floor) loops continuously, so funding deposits and payout
