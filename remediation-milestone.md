@@ -72,6 +72,10 @@ account is locked due to a billing issue.` This is an external account/billing
 blocker rather than a repository test failure. The equivalent local release
 matrix and full-history gitleaks scan pass as recorded above; hosted green runs
 require the repository owner to unlock GitHub Actions billing and rerun them.
+The authenticated GitHub Billing overview identifies the underlying account
+condition as `Your payment authorization has failed` and directs the owner to
+contact the bank or update the payment method. A rerun on 2026-11-01 reproduced
+the same pre-run lock before any workflow step executed.
 
 ## Current deployment funding smoke
 
