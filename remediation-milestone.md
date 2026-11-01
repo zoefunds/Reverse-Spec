@@ -63,6 +63,16 @@ Status: complete and deployed to production on 2026-11-01.
 - Production relayers wait five Base Sepolia confirmations for funding,
   acknowledgement, and settlement transactions.
 
+### Hosted CI account blocker
+
+Commit `301a0b3` triggered CI run `41305757094` (contract, backend, frontend,
+relayer, and Base escrow jobs) and secret-scan run `41305757068`. GitHub did not
+start any job and annotated each with: `The job was not started because your
+account is locked due to a billing issue.` This is an external account/billing
+blocker rather than a repository test failure. The equivalent local release
+matrix and full-history gitleaks scan pass as recorded above; hosted green runs
+require the repository owner to unlock GitHub Actions billing and rerun them.
+
 ## Current deployment funding smoke
 
 The current coordinated pair completed a real 1 USDC lifecycle on bounty `1`:
