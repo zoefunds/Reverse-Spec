@@ -18,7 +18,7 @@ Status: complete and deployed to production on 2026-11-01.
   cover unavailable evidence and failed independent AI execution.
 - The tracked E2E key file is removed and ignored. E2E credentials are injected
   only from a secret manager. `docs/SECURITY-KEY-ROTATION.md` documents wallet
-  retirement and full-history removal; these operational steps are mandatory.
+  retirement and completed full-history removal.
 - Address defaults and deployment examples use the coordinated production pair:
   GenLayer `0x185cE8fff49fe93f57635aB03FC19B9e5d3D04e6` and Base Sepolia
   `0x8e07D1aE543c489D64E368A579Ac28cF8b541256` (deployment block `52994901`).

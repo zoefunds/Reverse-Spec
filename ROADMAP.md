@@ -1,9 +1,9 @@
 # Roadmap
 
-This is a working protocol, not a demo shell — proven live moving real GEN
-through the original native-currency design, and now rewritten (v1) to a
-split-custody model where a Base Sepolia Solidity escrow holds real USDC
-and GenLayer judges and instructs payouts. What's next, roughly in order:
+This is a working protocol, not a demo shell. The current split-custody
+production path has been proven live end to end: a Base Sepolia Solidity
+escrow holds real USDC while GenLayer judges and instructs payouts. What's
+next, roughly in order:
 
 ## Near-term (protocol hardening)
 

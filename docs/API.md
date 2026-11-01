@@ -1,5 +1,8 @@
 # REST API (`/api/v1`)
 
+Production base URL:
+`https://reverse-spec-production-api.fly.dev/api/v1`.
+
 Auth: `Authorization: Bearer <jwt>` where marked. Errors return
 `{"detail": "..."}` with appropriate status codes. Rate limits: 120/min
 default, 20/min on auth routes.

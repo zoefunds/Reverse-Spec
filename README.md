@@ -13,26 +13,22 @@ AI-validator consensus, not by any company or server.
 | | |
 |---|---|
 | Frontend | https://reverse-spec.vercel.app |
-| Backend API | https://reverse-spec-api.fly.dev (`/healthz` for status) |
+| Backend API | https://reverse-spec-production-api.fly.dev (`/healthz` for status) |
 | Contract (StudioNet) | `0x185cE8fff49fe93f57635aB03FC19B9e5d3D04e6` |
+| Escrow (Base Sepolia) | `0x8e07D1aE543c489D64E368A579Ac28cF8b541256` |
 | Repo | https://github.com/zoefunds/Reverse-Spec |
 
-Proven live (v0.x, native-GEN era), not simulated: 4 funded bounties
-(10,000–50,000 GEN), a real consensus evaluation with written validator
-reasoning, and a payout verified by checking actual StudioNet wallet
-balances after claim — 47,500 GEN and 2,500 GEN landed in the winner's and
-creator's real wallets, confirmed independently of the contract's own
-bookkeeping. See [MEMORY.md](MEMORY.md) for the full run log, including two
-real production bugs found and fixed during live testing (a broken
-native-transfer primitive, and an indexer RPC-quota exhaustion under
-multi-machine HA).
-
-**v1 milestone (current):** the contract was rewritten to a split-custody
-design. Real value now moves in USDC on a Base Sepolia escrow contract
+**Current production design:** real value moves in USDC on a Base Sepolia escrow contract
 (`contracts/base/ReverseSpecEscrow.sol`, deployed at
 `0x8e07D1aE543c489D64E368A579Ac28cF8b541256`), not in native GEN inside the
 GenLayer contract. See "Why this needs GenLayer" and
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) below for the current design.
+
+The complete production path was proven live on 2026-11-01: a real 5 USDC
+deposit was observed through durable historical replay, acknowledged on
+GenLayer, evaluated by consensus, automatically settled on Base, and claimed
+as 4.75 USDC by the winner and 0.25 USDC by the creator. Transaction evidence
+is recorded in [remediation-milestone.md](remediation-milestone.md).
 
 ## Why this needs GenLayer
 
@@ -86,7 +82,7 @@ Base `Funded` events and calls `record_funding` on GenLayer;
 `escrow.settle()` on Base, then calls `mark_settled` back on GenLayer).
 
 - **Contract** ([contracts/reverse_spec_bounties.py](contracts/reverse_spec_bounties.py)) — single
-  ~1,646-line production contract; source of truth for bounty lifecycle,
+  ~1,650-line production contract; source of truth for bounty lifecycle,
   judging/consensus, and payout instructions (no fund custody).
 - **Base Sepolia escrow** ([contracts/base/ReverseSpecEscrow.sol](contracts/base/ReverseSpecEscrow.sol)) —
   holds the real USDC (`fund`, `settle` (relayer-only), `claim`); deployed
@@ -123,21 +119,26 @@ npm run dev   # http://localhost:3000
 # contract lint + schema validation
 .venv/bin/genvm-lint check contracts/reverse_spec_bounties.py --json
 
-# contract direct tests (33+) — covers PENDING_FUNDING/record_funding,
+# contract direct tests (51) — covers PENDING_FUNDING/record_funding,
 # submission-window/abandonment-recovery gating, and the tightened
 # consensus tolerances
 .venv/bin/pytest contracts-tests/direct/ -v
 
-# backend API tests (12)
-cd backend && ../.venv/bin/pytest tests/ -v
+# backend API tests (13)
+(cd backend && ../.venv/bin/pytest tests/ -v)
+
+# relayer durability and normalization tests (4)
+(cd backend/relayer && npm test)
+
+# Base escrow lifecycle tests (3)
+(cd contracts/base && forge test)
 
 # frontend type-check + build
-cd frontend && npm run build
+(cd frontend && npm run build)
 
-# live smoke test against the deployed StudioNet contract + Base Sepolia
-# escrow (creates a real bounty and funds it in USDC; StudioNet is gasless,
-# Base Sepolia needs testnet ETH for gas)
-.venv/bin/python scripts/e2e_full.py
+# full live payment path; requires secret-injected creator/solver keys,
+# test USDC and gas, and waits through the one-hour protocol floor
+(cd backend/relayer && npm run e2e:payment)
 ```
 
 ## Documentation
@@ -148,4 +149,5 @@ cd frontend && npm run build
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — Fly.io (24/7) + Vercel + contract
 - [docs/API.md](docs/API.md) — REST endpoints
 - [docs/CONTRACT.md](docs/CONTRACT.md) — contract surface & consensus design
-- [MEMORY.md](MEMORY.md) — living project memory & full test/deploy history
+- [MEMORY.md](MEMORY.md) — concise current production state and decisions
+- [remediation-milestone.md](remediation-milestone.md) — live payment-path evidence

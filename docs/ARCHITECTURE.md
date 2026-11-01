@@ -1,5 +1,9 @@
 # Architecture
 
+Current production endpoints and addresses are maintained in
+[`../MEMORY.md`](../MEMORY.md). The active Fly services are
+`reverse-spec-production-api` and `reverse-spec-production-relayer`.
+
 ## Division of responsibility
 
 | Layer | Role | Trust |
@@ -112,7 +116,7 @@ injected provider directly.
 
 ## Indexer
 
-Async task inside the API process. Every 30s: platform stats + invariant →
+Async task inside the API process. Production polls every 120s (configurable): platform stats + invariant →
 bounty pages → changed bounties' submissions → reward ledgers. All failures
 degrade to a `degraded` status surfaced at `/healthz`; the API never dies
 with it (24/7 requirement).

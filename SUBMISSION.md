@@ -38,33 +38,37 @@ verified the same conclusion from the same real evidence."
 ## What actually happens to the money
 
 This isn't a scoring app that separately tracks who "should" get paid.
-Real GEN moves:
+Real USDC moves through a Base Sepolia escrow:
 
-1. A creator funds a bounty — GEN leaves their wallet and sits in the
-   contract's escrow the moment the transaction confirms.
-2. A solver submits a rationale plus a link to real, public, checkable work
+1. The creator creates a uniquely referenced bounty shell on GenLayer, then
+   approves and deposits USDC into `ReverseSpecEscrow` on Base Sepolia.
+2. The standing relayer observes the confirmed deposit, records it on
+   GenLayer, and acknowledges the deposit on Base. Only then does the bounty
+   open for submissions. A mistaken unacknowledged deposit becomes refundable
+   after the safety delay.
+3. A solver submits a rationale plus a link to real, public, checkable work
    (a repo, a doc, a gist).
-3. When evaluation runs, GenLayer validators fetch that link themselves and
+4. When evaluation runs, GenLayer validators fetch that link themselves and
    grade it — the solver's own description of their work is treated as an
    unverified claim, not evidence. If the link is dead or empty, the
    evidence score is capped low automatically.
-4. On finalization, the contract splits the escrow — 85% winner, 10%
-   runner-up, 5% back to the creator — and credits each address.
-5. Claiming triggers an actual on-chain transfer out of the contract into
-   the recipient's wallet.
+5. On finalization, GenLayer computes an 85% winner / 10% runner-up / 5%
+   creator allocation. If there is no runner-up, the winner receives 95%.
+6. The relayer executes those consensus-derived allocations on Base, and each
+   recipient calls `claim()` to receive actual USDC.
 
-We tested this for real on GenLayer StudioNet, not with mocks: four funded
-bounties between 10,000 and 50,000 GEN each, real submissions with real
-evidence URLs, a real consensus evaluation that fetched a linked repo and
-returned a written verdict, and a real payout of 47,500 GEN that a wallet
-then claimed and received.
+This path was tested in production on 2026-11-01 without synthetic funding or
+settlement identifiers: 5 USDC was deposited, automatically acknowledged,
+evaluated, settled, and claimed as 4.75 USDC by the sole winner and 0.25 USDC
+by the creator. See [remediation-milestone.md](remediation-milestone.md).
 
 ## How to use it
 
 **As a bounty creator:** connect a wallet (MetaMask, Rainbow, or Zerion),
 go to "Create Bounty," describe the spec as you understand it, optionally
-describe what you suspect the *real* underlying problem is, and fund it
-with GEN. The GEN is now in escrow — you no longer control it directly.
+describe what you suspect the *real* underlying problem is, choose the
+submission window, and fund it with Base Sepolia USDC. Funding is bound to the
+specific creation reference, not a global bounty counter.
 
 **As a solver:** browse the Explorer, open a bounty, read both the literal
 spec and the creator's guess at the deeper problem, then submit your
@@ -79,15 +83,18 @@ acting in good faith to pay out.
 
 ## Repository map
 
-- `contracts/reverse_spec_bounties.py` — the one production Intelligent
-  Contract (escrow, submissions, consensus evaluation, payouts)
+- `contracts/reverse_spec_bounties.py` — production Intelligent Contract
+  (lifecycle, submissions, consensus evaluation, payout instructions)
+- `contracts/base/ReverseSpecEscrow.sol` — Base Sepolia USDC custody,
+  acknowledgment, refund, settlement, and claims
 - `backend/` — FastAPI service (wallet auth, search/read cache, chain
   indexer), deployed 24/7 on Fly.io
 - `frontend/` — Next.js app (all pages listed below), deployed on Vercel
-- `contracts-tests/` — 29 direct tests + integration smoke tests against
-  the live deployed contract
+- `backend/relayer/` — durable Base↔GenLayer funding and payout relay
+- `contracts-tests/` — 51 direct Intelligent Contract tests
 - `docs/` — architecture, API, contract reference, deployment guide
-- `MEMORY.md` — running log of every decision and every on-chain test run
+- `MEMORY.md` — concise current deployment and architecture record
 
-Live: contract `0x185cE8fff49fe93f57635aB03FC19B9e5d3D04e6` on StudioNet,
-frontend on Vercel, backend on Fly.io — see [README.md](README.md) for URLs.
+Live: GenLayer contract `0x185cE8fff49fe93f57635aB03FC19B9e5d3D04e6`,
+Base escrow `0x8e07D1aE543c489D64E368A579Ac28cF8b541256`, frontend on Vercel, and
+replacement backend/relayer apps on Fly.io — see [README.md](README.md).

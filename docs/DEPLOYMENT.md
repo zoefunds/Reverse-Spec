@@ -76,6 +76,10 @@ and makes the final USDC claim. It never directly calls `record_funding` or
 `mark_settled`. Inject the two E2E keys and `E2E_EVIDENCE_URL` from a secret
 manager.
 
+The production run completed successfully for bounty `1`; its Base funding,
+settlement, and claim transaction hashes are recorded in
+[`../remediation-milestone.md`](../remediation-milestone.md).
+
 ## Backend — Fly.io (24/7)
 
 ```bash
@@ -83,8 +87,7 @@ cd backend
 fly launch --no-deploy --copy-config --name reverse-spec-production-api
 fly postgres create --name reverse-spec-production-db
 fly postgres attach reverse-spec-production-db -a reverse-spec-production-api
-# convert DATABASE_URL to the SQLAlchemy driver form:
-fly secrets set DATABASE_URL="postgresql+psycopg://<user>:<pass>@<host>/<db>"
+# The app normalizes Fly's postgres:// DATABASE_URL to the psycopg driver.
 fly secrets set JWT_SECRET="$(openssl rand -hex 32)"
 fly secrets set CORS_ORIGINS="https://<your-vercel-domain>"
 fly deploy -a reverse-spec-production-api
@@ -103,6 +106,25 @@ Operations:
 - Scale out: `fly scale count 2` (recommended for redundancy)
 - Backups: Fly Postgres daily snapshots (`fly postgres backup list`)
 
+## Relayer — Fly.io (24/7)
+
+The current app is `reverse-spec-production-relayer`. It runs one background
+machine with the encrypted `relayer_state` volume mounted at `/data`; the
+durable cursor and pending-deposit queue live at
+`/data/relayer-state.json`.
+
+```bash
+cd backend/relayer
+fly secrets set BASE_SEPOLIA_RELAYER_PRIVATE_KEY="0x..." \
+  -a reverse-spec-production-relayer
+fly deploy -a reverse-spec-production-relayer
+```
+
+The public Base RPC limits log queries to 200 blocks, so the relay scans
+199-block windows and replays forward from `BASE_SEPOLIA_FUNDING_START_BLOCK`.
+Never remove or replace the state volume without first preserving its contents
+and confirming the deployment-block replay configuration.
+
 ## Frontend — Vercel
 
 ```bash
@@ -110,6 +132,7 @@ cd frontend
 vercel link
 vercel env add NEXT_PUBLIC_API_BASE production      # https://reverse-spec-production-api.fly.dev/api/v1
 vercel env add NEXT_PUBLIC_CONTRACT_ADDRESS production
+vercel env add NEXT_PUBLIC_ESCROW_ADDRESS production
 vercel env add NEXT_PUBLIC_GENLAYER_NETWORK production   # studionet
 vercel --prod
 ```

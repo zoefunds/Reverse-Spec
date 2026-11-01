@@ -24,14 +24,15 @@ Both non-zero StudioNet balances were swept to the replacement relayer wallet
 - creator sweep: `0xd1c067d5f45a444e753fc91e20f9e688bdcd8f1fc0f875a28081e947946adb01`
 - solver A sweep: `0x3233a1b7ecd2d032a72c0e9d5fa5ed96cec77377a623ca074a793dc910c50013`
 
-1. On a clean machine create replacement creator, solver, owner, and relayer
-   wallets. Never reuse a value found in repository history.
-2. Transfer owner/relayer roles to the replacements and retire the old wallets.
-3. Replace Fly, Vercel, CI, and local deployment secrets; redeploy the relayer.
-4. Purge the file from every branch and tag with `git filter-repo`, force-push,
-   and require collaborators to re-clone. Current-tree deletion is insufficient.
-5. Run a full-history secret scanner and verify the old addresses have no role,
-   balance, allowance, or active secret before closing the incident.
+Incident closure completed on 2026-11-01:
+
+- [x] Created and deployed from a replacement owner/relayer identity.
+- [x] Retired the exposed wallets after sweeping their remaining balances.
+- [x] Replaced production Fly/Vercel deployment configuration and redeployed.
+- [x] Purged the file from every remote Git ref with `git filter-repo` and
+  force-pushed the sanitized history.
+- [x] Enabled full-history secret scanning and verified the exposed addresses
+  have no remaining role or balance.
 
 E2E scripts accept credentials only via `E2E_<ROLE>_PRIVATE_KEY` environment
 variables and must never persist generated wallet keys. The repository's
