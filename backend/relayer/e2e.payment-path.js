@@ -98,11 +98,13 @@ if (!bountyId) {
 } else if (!depositId) {
   throw new Error("E2E_RESUME_DEPOSIT_ID is required when resuming a bounty");
 }
-await poll("automatic funding acknowledgement", async () => {
-  const bounty = await read(creator, "get_bounty", [bountyId]);
-  const deposit = await escrowCreator.deposits(depositId);
-  return bounty.status === "OPEN" && Boolean(deposit.acknowledged ?? deposit[4]);
-});
+if (process.env.E2E_RESUME_ACKNOWLEDGED !== "true") {
+  await poll("automatic funding acknowledgement", async () => {
+    const bounty = await read(creator, "get_bounty", [bountyId]);
+    const deposit = await escrowCreator.deposits(depositId);
+    return bounty.status === "OPEN" && Boolean(deposit.acknowledged ?? deposit[4]);
+  });
+}
 console.log(`funding acknowledged: bounty=${bountyId} deposit=${depositId}`);
 
 let submissionId = process.env.E2E_RESUME_SUBMISSION_TX ?? "";
@@ -115,10 +117,13 @@ if (!submissionId) {
 }
 console.log(`funded bounty=${bountyId}; submission tx=${submissionId}; waiting for protocol deadline`);
 
-await poll("submission deadline", async () => {
-  const bounty = await read(creator, "get_bounty", [bountyId]);
-  return Math.floor(Date.now() / 1000) > Number(bounty.submission_deadline);
-}, 75 * 60_000);
+const knownDeadline = Number(process.env.E2E_RESUME_DEADLINE ?? 0);
+const deadline = knownDeadline || Number((await read(creator, "get_bounty", [bountyId])).submission_deadline);
+const deadlineWaitMs = Math.max(0, (deadline + 1) * 1000 - Date.now());
+if (deadlineWaitMs) {
+  console.log(`sleeping ${Math.ceil(deadlineWaitMs / 1000)}s until the contract deadline`);
+  await sleep(deadlineWaitMs);
+}
 await write(creator, "close_submissions", [bountyId]);
 const submissions = await read(creator, "get_bounty_submissions", [bountyId]);
 const sid = Number(submissions[0].id);
